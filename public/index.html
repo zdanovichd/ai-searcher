@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AI Searcher — сравнение ответов</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="noise" aria-hidden="true"></div>
+    <header class="top">
+      <h1>AI Searcher</h1>
+      <p class="lead">
+        Один запрос — ответы от выбранных моделей и список ссылок из каждого ответа.
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="panel query-panel">
+        <label for="q">Запрос</label>
+        <textarea
+          id="q"
+          rows="4"
+          placeholder="Например: лучшее SEO-агентство в Москве"
+        ></textarea>
+
+        <fieldset class="providers">
+          <legend>Модели</legend>
+          <label class="chip chip-all">
+            <input type="checkbox" name="all" value="all" checked />
+            <span>Все настроенные</span>
+          </label>
+          <div id="provider-list" class="provider-list"></div>
+        </fieldset>
+
+        <button type="button" id="run" class="btn">Спросить</button>
+        <p id="status" class="status" role="status"></p>
+      </section>
+
+      <section id="results" class="results" aria-live="polite"></section>
+    </main>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>
