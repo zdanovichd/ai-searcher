@@ -16,7 +16,7 @@
 ## Установка
 
 ```bash
-git clone <repo-url> ai-sercher
+git clone https://github.com/zdanovichd/ai-sercher.git
 cd ai-sercher
 npm install
 ```
