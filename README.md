@@ -9,6 +9,10 @@
 - Провайдеры: **ChatGPT** (OpenAI), **DeepSeek**, **Perplexity**, **Google Gemini**, **Алиса AI** (Yandex Cloud).
 - REST API для интеграций.
 
+## Индексация поисковиками
+
+Сайт **не предназначен** для выдачи в поиске: `public/robots.txt` (`Disallow: /`), в HTML — `<meta name="robots" content="noindex, nofollow">`, для всех ответов Express выставляется заголовок **`X-Robots-Tag: noindex, nofollow`**. Это снижает вероятность индексации, но не гарантирует её на 100% (боты могут игнорировать правила).
+
 ## Требования
 
 - [Node.js](https://nodejs.org/) 18+ (рекомендуется актуальный LTS).

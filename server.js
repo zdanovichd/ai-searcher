@@ -15,6 +15,11 @@ const PORT = Number(process.env.PORT) || 3847;
 
 app.use(express.json({ limit: "64kb" }));
 
+app.use((_req, res, next) => {
+  res.setHeader("X-Robots-Tag", "noindex, nofollow");
+  next();
+});
+
 app.get("/api/meta", (_req, res) => {
   const configured = getConfiguredProviders();
   const providers = PROVIDER_IDS.map((id) => ({
