@@ -67,6 +67,54 @@ function escapeHtml(s) {
     .replace(/"/g, "&quot;");
 }
 
+function fmtTok(n) {
+  if (n == null || Number.isNaN(n)) return "—";
+  return String(n);
+}
+
+function appendUsageBlock(card, usage) {
+  const block = document.createElement("div");
+  block.className = "card-usage";
+
+  const title = document.createElement("div");
+  title.className = "card-usage-title";
+  title.textContent = "Токены (за этот запрос)";
+  block.append(title);
+
+  const has =
+    usage &&
+    (usage.input != null || usage.output != null || usage.total != null);
+
+  if (!has) {
+    const p = document.createElement("p");
+    p.className = "card-usage-missing";
+    p.textContent =
+      "Провайдер не вернул разбивку токенов в ответе (или ответ без поля usage).";
+    block.append(p);
+    card.append(block);
+    return;
+  }
+
+  const grid = document.createElement("div");
+  grid.className = "usage-grid";
+  const rows = [
+    ["Вход (prompt)", fmtTok(usage.input)],
+    ["Выход (completion)", fmtTok(usage.output)],
+    ["Всего", fmtTok(usage.total)],
+  ];
+  for (const [k, v] of rows) {
+    const dt = document.createElement("span");
+    dt.className = "usage-k";
+    dt.textContent = k;
+    const dd = document.createElement("span");
+    dd.className = "usage-v";
+    dd.textContent = v;
+    grid.append(dt, dd);
+  }
+  block.append(grid);
+  card.append(block);
+}
+
 function renderResults(data) {
   resultsEl.innerHTML = "";
 
@@ -83,16 +131,17 @@ function renderResults(data) {
   for (const r of data.results || []) {
     const card = document.createElement("article");
     card.className = "card";
+
     const h2 = document.createElement("h2");
     h2.textContent = r.label;
-    const metaSpan = document.createElement("span");
-    metaSpan.className = "meta";
-    metaSpan.textContent = r.error
-      ? "ошибка"
-      : `${r.durationMs} мс · ссылок: ${r.links.length}`;
-    h2.append(metaSpan);
-
     card.append(h2);
+
+    const sub = document.createElement("div");
+    sub.className = "card-subhead";
+    sub.textContent = r.error
+      ? "ошибка"
+      : `${r.durationMs} мс · ссылок: ${r.links?.length ?? 0}`;
+    card.append(sub);
 
     if (r.error) {
       const err = document.createElement("p");
@@ -100,6 +149,8 @@ function renderResults(data) {
       err.textContent = r.error;
       card.append(err);
     } else {
+      appendUsageBlock(card, r.usage);
+
       const body = document.createElement("div");
       body.className = "body";
       body.textContent = r.text;

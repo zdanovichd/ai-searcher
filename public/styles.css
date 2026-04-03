@@ -226,11 +226,57 @@ body {
 .card h2 {
   font-family: var(--font-display);
   font-size: 1.15rem;
-  margin: 0 0 0.35rem;
-  display: flex;
+  margin: 0 0 0.25rem;
+}
+
+.card-subhead {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 0.65rem;
+}
+
+.card-usage {
+  margin: 0 0 0.85rem;
+  padding: 0.65rem 0.75rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: rgba(232, 165, 75, 0.06);
+  border-left: 3px solid var(--accent);
+}
+
+.card-usage-title {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+  margin-bottom: 0.45rem;
+}
+
+.card-usage-missing {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.usage-grid {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.35rem 1.25rem;
+  font-size: 0.9rem;
   align-items: baseline;
-  gap: 0.5rem;
-  flex-wrap: wrap;
+}
+
+.usage-k {
+  color: var(--muted);
+}
+
+.usage-v {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--text);
+  text-align: right;
 }
 
 .card .meta {

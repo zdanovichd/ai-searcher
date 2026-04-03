@@ -112,8 +112,32 @@ npm start
 
 **Успешный ответ:** `{ "results", "skippedLabels", "error": null }`
 
-- `results[]` — для каждой модели: `id`, `label`, `text`, `links[]`, `durationMs`, при ошибке вызова — поле `error`.
+- `results[]` — для каждой модели: `id`, `label`, `text`, `links[]`, `durationMs`, при успехе — `usage`: `{ input, output, total }` (токены prompt / completion / всего за **этот** запрос; остаток квоты API не возвращается), при ошибке — поле `error`.
 - `skippedLabels` — человекочитаемые названия провайдеров без ключей в `.env`.
+
+## Где в API смотреть токены (официально)
+
+В интерфейсе мы показываем `usage.input` / `usage.output` / `usage.total`. Откуда это берётся у каждого провайдера:
+
+| Провайдер | Где в ответе | Документация |
+|-----------|----------------|--------------|
+| **ChatGPT** (OpenAI) | Объект **`usage`**: `prompt_tokens`, `completion_tokens`, `total_tokens` | [Chat Completions — response](https://platform.openai.com/docs/api-reference/chat/object) |
+| **DeepSeek** | Как у OpenAI: **`usage`** в JSON ответа `POST /chat/completions` | [Create chat completion](https://api-docs.deepseek.com/api/create-chat-completion) |
+| **Perplexity** | **`usage`** в ответе **`POST /v1/sonar`** (`prompt_tokens`, `completion_tokens`, `total_tokens`, плюс свои поля вроде `cost`) | [Sonar / chat completions](https://docs.perplexity.ai/api-reference/chat-completions-post) |
+| **Gemini** | **`usageMetadata`**: `promptTokenCount`, `candidatesTokenCount`, `totalTokenCount` | [generateContent — ответ](https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse) |
+| **Алиса** (Yandex, OpenAI-compatible Responses) | **`usage`**: `input_tokens`, `output_tokens`, `total_tokens` (как у OpenAI Responses API) | [OpenAI Responses — usage](https://platform.openai.com/docs/api-reference/responses/object#responses/object-usage) (совместимый контракт) |
+
+**Лимиты и деньги** по ключу (остаток квоты, баланс) смотрите в **консолях биллинга** провайдера — в теле одного запроса это обычно не приходит.
+
+В коде разбор унифицирован в `src/tokenUsage.js` (разные имена полей сводятся к одному виду).
+
+**Реализация:** ChatGPT, DeepSeek, Perplexity и Yandex Алиса вызываются через **`fetch` + сырой JSON** (не OpenAI SDK), чтобы в ответе гарантированно читать `usage` так, как отдаёт провайдер. У Gemini по-прежнему `generateContent` по REST.
+
+## Почему 403 (ChatGPT, Gemini, Алиса)
+
+- **OpenAI:** запрет по **геолокации IP** сервера («Country, region, or territory not supported»). Часто при VPS в РФ и ряде других регионов. Нужен исходящий трафик из поддерживаемой зоны (другой хостинг, прокси) или вызов API не с этого IP.
+- **Google Gemini (AI Studio):** аналогично — **«User location is not supported»** завязан на регион запроса; с IP РФ запрос с сервера часто отклоняется. Варианты: инфраструктура в поддерживаемом регионе, **Vertex AI** в GCP, прокси.
+- **Yandex Алиса:** `403 Forbidden` чаще про **права и ключ**: роль `ai.languageModels.user`, верный каталог в `YANDEX_CLOUD_FOLDER_ID`, неистёкший API-ключ, доступ к модели в каталоге. Иногда политика облака к иностранным IP — уточняйте в документации Yandex Cloud.
 
 ## Структура проекта
 
@@ -124,6 +148,7 @@ npm start
 └── src/
     ├── providers.js    # Вызовы API провайдеров
     ├── searchService.js
+    ├── tokenUsage.js   # Нормализация usage из разных форматов ответов
     ├── extractLinks.js # Парсинг URL из ответа
     └── prompt.js       # Общий системный промпт
 ```
@@ -133,7 +158,7 @@ npm start
 - **DeepSeek:** ошибка `402` означает нехватку средств на счёте в [platform.deepseek.com](https://platform.deepseek.com).
 - **Gemini:** идентификаторы моделей меняются; при ошибке «model not found» задайте рабочую модель в `GOOGLE_GEMINI_MODEL` или проверьте список:  
   `GET https://generativelanguage.googleapis.com/v1beta/models?key=ВАШ_КЛЮЧ`
-- **Perplexity:** для актуального **Agent API** (Responses + пресеты) может потребоваться отдельная доработка `src/providers.js`; сейчас используется путь `chat.completions` с базой `https://api.perplexity.ai` и моделью по умолчанию `sonar`.
+- **Perplexity:** вызов идёт на официальный **`POST /v1/sonar`** (не `/v1/chat/completions`), чтобы в ответе был блок **`usage`** с токенами. Модель по умолчанию — `sonar`, переопределение — `PERPLEXITY_MODEL`.
 
 ## Лицензия
 

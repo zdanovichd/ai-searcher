@@ -11,14 +11,16 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=3" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
     <header class="top">
       <h1>AI Searcher</h1>
       <p class="lead">
-        Один запрос — ответы от выбранных моделей и список ссылок из каждого ответа.
+        Один запрос — ответы от выбранных моделей и ссылки из текста. У каждой модели под заголовком блок
+        <strong>Токены</strong> (вход / выход / всего за запрос). Остаток квоты по ключу API провайдеры обычно не
+        присылают.
       </p>
     </header>
 
@@ -47,6 +49,6 @@
       <section id="results" class="results" aria-live="polite"></section>
     </main>
 
-    <script src="/app.js" type="module"></script>
+    <script src="/app.js?v=3" type="module"></script>
   </body>
 </html>
