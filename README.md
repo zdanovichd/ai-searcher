@@ -17,9 +17,35 @@
 
 ```bash
 git clone https://github.com/zdanovichd/ai-searcher.git
-cd ai-sercher
+cd ai-searcher
 npm install
 ```
+
+## Продакшен (gpt.seo-performance.ru)
+
+Развёрнуто на **Ubuntu + nginx + PM2**: приложение в `/var/www/gpt`, прокси на порт **3847**, HTTPS через Let’s Encrypt.
+
+- Сайт: [https://gpt.seo-performance.ru](https://gpt.seo-performance.ru)
+- На сервере должны лежать ключи в **`/var/www/gpt/.env`** (не коммитить).
+
+Повторная выгрузка с локальной машины (из корня репозитория):
+
+```bash
+chmod +x scripts/deploy-production.sh
+./scripts/deploy-production.sh
+```
+
+Или вручную: `ssh root@85.198.69.22`, затем `cd /var/www/gpt && git pull` / `rsync` и `pm2 restart ai-searcher`.
+
+Удобный SSH-алиас (в `~/.ssh/config`):
+
+```sshconfig
+Host seo-performance gpt-server
+  HostName 85.198.69.22
+  User root
+```
+
+Подключение: `ssh seo-performance`.
 
 ## Настройка ключей
 
