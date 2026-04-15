@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=10" />
+    <link rel="stylesheet" href="/styles.css?v=13" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -19,9 +19,9 @@
       <h1>AI Searcher</h1>
       <p class="lead">
         Ответы от выбранных моделей и ссылки из текста. Несколько запросов — списком: <strong>каждая строка</strong> —
-        отдельный запрос (до 120 строк); на сервере пакет обрабатывается параллельно (с ограничением одновременных
-        пакетов). У каждой модели — блок <strong>Токены</strong> (вход / выход / всего). Результаты можно скачать в
-        Excel. API: <a href="/api-docs/">Swagger</a> · <a href="/openapi.json">OpenAPI JSON</a>.
+        отдельный запрос (до 120 строк). Таблица появляется сразу и <strong>дополняется по мере готовности</strong> ячеек
+        (поток с сервера). Результаты можно скачать в Excel. API:
+        <a href="/api-docs/">Swagger</a> · <a href="/openapi.json">OpenAPI JSON</a>.
       </p>
     </header>
 
@@ -30,13 +30,12 @@
         <label for="q">Запрос</label>
         <textarea
           id="q"
-          rows="5"
-          placeholder="Одна строка — один запрос. Пример:&#10;запрос A&#10;запрос B"
+          rows="8"
+          placeholder="Одна строка — один запрос (до 120). Пример:&#10;запрос A&#10;запрос B"
         ></textarea>
         <p class="field-hint">
-          До 120 строк; пустые строки игнорируются. Один запрос не может занимать несколько строк — переносы внутри
-          фразы разбивают её на отдельные запросы. Модели без ключа в <code>.env</code> сервер пропустит; подсказка
-          появится после ответа.
+          До 120 строк; пустые строки игнорируются. Один запрос — одна строка (перенос внутри фразы даёт два запроса).
+          Модели без ключа в <code>.env</code> сервер пропустит.
         </p>
 
         <fieldset class="providers">
@@ -57,9 +56,45 @@
         <p id="status" class="status" role="status"></p>
       </section>
 
-      <section id="results" class="results" aria-live="polite"></section>
+      <section id="results" class="results" aria-live="polite">
+        <div id="stream-progress" class="stream-progress is-hidden" aria-hidden="true">
+          <div class="stream-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="stream-progress-fill" class="stream-progress-fill"></div>
+          </div>
+          <span id="stream-progress-pct" class="stream-progress-pct">0%</span>
+        </div>
+        <div id="results-table-host"></div>
+      </section>
     </main>
 
-    <script src="/app.js?v=10" type="module"></script>
+    <button
+      type="button"
+      id="scroll-top-btn"
+      class="scroll-top-btn is-hidden"
+      aria-label="Наверх"
+      title="Наверх"
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+      </svg>
+    </button>
+
+    <div id="stream-progress-dock" class="stream-progress-dock is-hidden" aria-hidden="true">
+      <div class="stream-progress-dock-inner">
+        <span class="stream-progress-dock-label">Прогресс</span>
+        <div
+          class="stream-progress-track stream-progress-track--dock"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="stream-progress-dock-fill" class="stream-progress-fill"></div>
+        </div>
+        <span id="stream-progress-dock-pct" class="stream-progress-pct">0%</span>
+      </div>
+    </div>
+
+    <script src="/app.js?v=15" type="module"></script>
   </body>
 </html>

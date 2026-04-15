@@ -9,6 +9,7 @@ import {
   MAX_BATCH_QUERIES,
   searchAcrossProviders,
   searchBatchAcrossProviders,
+  streamSearchProgress,
 } from "./src/searchService.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,63 @@ function requireApiSecret(req, res, next) {
     return;
   }
   next();
+}
+
+/**
+ * @param {unknown} body
+ * @returns {{ ok: true, queries: string[], selected: string[], batchInput: boolean } | { ok: false, status: number, error: string }}
+ */
+function parseQueryBody(body) {
+  const raw = body?.query;
+  const rawQueries = body?.queries;
+  const providers = body?.providers;
+  let selected = Array.isArray(providers) ? providers : ["all"];
+  selected = selected.filter((p) => p === "all" || PROVIDER_IDS.includes(p));
+  if (!selected.length) selected = ["all"];
+
+  const batchInput =
+    Array.isArray(rawQueries) &&
+    rawQueries.length > 0 &&
+    rawQueries.some((q) => typeof q === "string" && q.trim());
+
+  if (batchInput) {
+    const queries = rawQueries
+      .map((q) => (typeof q === "string" ? q.trim() : ""))
+      .filter(Boolean);
+    if (!queries.length) {
+      return { ok: false, status: 400, error: "Пустой список запросов" };
+    }
+    if (queries.length > MAX_BATCH_QUERIES) {
+      return {
+        ok: false,
+        status: 400,
+        error: `Слишком много запросов в пакете (макс. ${MAX_BATCH_QUERIES}).`,
+      };
+    }
+    for (let i = 0; i < queries.length; i++) {
+      if (queries[i].length > 8000) {
+        return {
+          ok: false,
+          status: 400,
+          error: `Запрос #${i + 1} длиннее 8000 символов.`,
+        };
+      }
+    }
+    return { ok: true, queries, selected, batchInput: true };
+  }
+
+  const query = typeof raw === "string" ? raw.trim() : "";
+  if (!query) {
+    return { ok: false, status: 400, error: "Пустой запрос" };
+  }
+  if (query.length > 8000) {
+    return { ok: false, status: 400, error: "Запрос слишком длинный (макс. 8000 символов)" };
+  }
+  return { ok: true, queries: [query], selected, batchInput: false };
+}
+
+function sseWrite(res, obj) {
+  res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
 const xlsxVendorPath = join(__dirname, "node_modules", "xlsx", "xlsx.mjs");
@@ -90,42 +148,45 @@ if (openApiSpec) {
   );
 }
 
+/** Поток SSE: ячейки таблицы по мере готовности (JSON в событиях `data:`). */
+app.post("/api/query/stream", requireApiSecret, async (req, res) => {
+  const parsed = parseQueryBody(req.body);
+  if (!parsed.ok) {
+    res.status(parsed.status).json({ error: parsed.error });
+    return;
+  }
+  const { queries, selected } = parsed;
+  res.status(200);
+  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
+  res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no");
+  if (typeof res.flushHeaders === "function") res.flushHeaders();
+
+  try {
+    await streamSearchProgress(queries, selected, (ev) => {
+      sseWrite(res, ev);
+    });
+    res.end();
+  } catch (e) {
+    try {
+      sseWrite(res, { type: "error", message: e?.message || String(e) });
+    } catch (_) {
+      /* ignore */
+    }
+    res.end();
+  }
+});
+
 app.post("/api/query", requireApiSecret, async (req, res) => {
-  const raw = req.body?.query;
-  const rawQueries = req.body?.queries;
-  const providers = req.body?.providers;
+  const parsed = parseQueryBody(req.body);
+  if (!parsed.ok) {
+    res.status(parsed.status).json({ error: parsed.error });
+    return;
+  }
+  const { queries, selected, batchInput } = parsed;
 
-  let selected = Array.isArray(providers) ? providers : ["all"];
-  selected = selected.filter((p) => p === "all" || PROVIDER_IDS.includes(p));
-  if (!selected.length) selected = ["all"];
-
-  const isBatch =
-    Array.isArray(rawQueries) &&
-    rawQueries.length > 0 &&
-    rawQueries.some((q) => typeof q === "string" && q.trim());
-
-  if (isBatch) {
-    const queries = rawQueries
-      .map((q) => (typeof q === "string" ? q.trim() : ""))
-      .filter(Boolean);
-    if (!queries.length) {
-      res.status(400).json({ error: "Пустой список запросов" });
-      return;
-    }
-    if (queries.length > MAX_BATCH_QUERIES) {
-      res.status(400).json({
-        error: `Слишком много запросов в пакете (макс. ${MAX_BATCH_QUERIES}).`,
-      });
-      return;
-    }
-    for (let i = 0; i < queries.length; i++) {
-      if (queries[i].length > 8000) {
-        res.status(400).json({
-          error: `Запрос #${i + 1} длиннее 8000 символов.`,
-        });
-        return;
-      }
-    }
+  if (batchInput) {
     try {
       const out = await searchBatchAcrossProviders(queries, selected);
       res.json(out);
@@ -140,18 +201,8 @@ app.post("/api/query", requireApiSecret, async (req, res) => {
     return;
   }
 
-  const query = typeof raw === "string" ? raw.trim() : "";
-  if (!query) {
-    res.status(400).json({ error: "Пустой запрос" });
-    return;
-  }
-  if (query.length > 8000) {
-    res.status(400).json({ error: "Запрос слишком длинный (макс. 8000 символов)" });
-    return;
-  }
-
   try {
-    const out = await searchAcrossProviders(query, selected);
+    const out = await searchAcrossProviders(queries[0], selected);
     if (out.error) {
       res.status(400).json(out);
       return;
@@ -188,7 +239,7 @@ app.use((req, res) => {
 app.listen(PORT, () => {
   const base = `http://localhost:${PORT}`;
   console.log(`AI Searcher: ${base}`);
-  console.log(`  API:     POST ${base}/api/query`);
+  console.log(`  API:     POST ${base}/api/query  |  POST ${base}/api/query/stream (SSE)`);
   if (openApiSpec) {
     console.log(`  Swagger: ${base}/api-docs/  (редирект с /api-docs)`);
     console.log(`  OpenAPI: ${base}/openapi.json`);
