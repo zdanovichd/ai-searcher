@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "AI Searcher API",
-    "description": "Запрос к нескольким LLM-провайдерам за один вызов. Ключи провайдеров задаются на сервере в `.env`. Если задан `API_SECRET`, передайте **Authorization: Bearer** или **X-API-Key**.",
+    "description": "Запрос к нескольким LLM-провайдерам за один вызов: **`POST /api/query`** (JSON целиком) или **`POST /api/query/stream`** (SSE, по одной ячейке). Ключи провайдеров на сервере в `.env`. Если задан `API_SECRET` — **Authorization: Bearer** или **X-API-Key**.",
     "version": "1.0.0"
   },
   "servers": [
@@ -106,6 +106,91 @@
           },
           "500": {
             "description": "Внутренняя ошибка сервера",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/query/stream": {
+      "post": {
+        "tags": ["Query"],
+        "summary": "Поток результатов (Server-Sent Events)",
+        "description": "Тело запроса **то же**, что у `POST /api/query`: поле **`query`** или массив **`queries`** (до 120 строк) и **`providers`**. При успехе ответ — **`text/event-stream`**: события SSE в виде строк `data: ` + JSON (см. **`StreamEvent`**) + `\\n\\n`. Обычный порядок: **`meta`** → несколько **`result`** → **`done`**. Если ни один провайдер не настроен, может уйти только **`error`**, затем соединение закрывается. Заголовки: `Cache-Control: no-cache, no-transform`, `Connection: keep-alive`, `X-Accel-Buffering: no`. Ошибки **400** и **401** до открытия потока — обычный **`application/json`**, не SSE.",
+        "operationId": "postQueryStream",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/SingleQueryRequest" },
+                  { "$ref": "#/components/schemas/BatchQueryRequest" }
+                ]
+              },
+              "examples": {
+                "batchStream": {
+                  "summary": "Пакет (как в UI)",
+                  "value": {
+                    "queries": ["запрос один", "запрос два"],
+                    "providers": ["all"]
+                  }
+                },
+                "singleStream": {
+                  "summary": "Один запрос",
+                  "value": {
+                    "query": "кратко: что такое structured data",
+                    "providers": ["chatgpt", "google"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Поток SSE. Тело — последовательность блоков `data: <JSON>\\n\\n`; тип события в поле **`type`** (схема **`StreamEvent`**).",
+            "headers": {
+              "Cache-Control": {
+                "description": "Отключение кэширования для живого потока",
+                "schema": { "type": "string", "example": "no-cache, no-transform" }
+              },
+              "X-Accel-Buffering": {
+                "description": "Для nginx: не буферизовать SSE",
+                "schema": { "type": "string", "example": "no" }
+              }
+            },
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "description": "Формат SSE: повторяющиеся фрагменты `data: ` + один объект JSON (`StreamEvent`) + перевод строки; блок завершается пустой строкой."
+                },
+                "example": "data: {\"type\":\"meta\",\"queries\":[\"привет\"],\"providerIds\":[\"chatgpt\"],\"totalTasks\":1,\"skippedLabels\":[\"Perplexity\"]}\n\ndata: {\"type\":\"result\",\"queryIndex\":0,\"providerId\":\"chatgpt\",\"progress\":100,\"result\":{\"id\":\"chatgpt\",\"label\":\"ChatGPT\",\"text\":\"Ответ…\",\"links\":[\"https://example.com\"],\"error\":null,\"durationMs\":1200,\"usage\":{\"input\":10,\"output\":20,\"total\":30}}}\n\ndata: {\"type\":\"done\",\"skippedLabels\":[\"Perplexity\"]}\n\n"
+              }
+            }
+          },
+          "400": {
+            "description": "Ошибка валидации до открытия потока (JSON)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "401": {
+            "description": "Неверный или отсутствующий секрет при заданном `API_SECRET` (JSON)",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "Внутренняя ошибка (редко как JSON до потока; при сбое во время потока сервер может записать SSE с `type: error`)",
             "content": {
               "application/json": {
                 "schema": { "$ref": "#/components/schemas/ErrorResponse" }
@@ -230,6 +315,99 @@
           "skippedLabels": {
             "type": "array",
             "items": { "type": "string" }
+          }
+        }
+      },
+      "StreamEventMeta": {
+        "type": "object",
+        "required": ["type", "queries", "providerIds", "totalTasks", "skippedLabels"],
+        "properties": {
+          "type": { "type": "string", "enum": ["meta"] },
+          "queries": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Список пользовательских запросов в порядке обработки"
+          },
+          "providerIds": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Id активных провайдеров для этого прогона"
+          },
+          "totalTasks": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Число ячеек: запросы × модели (ожидаемое число событий `result`)"
+          },
+          "skippedLabels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Подписи провайдеров без ключа в .env"
+          }
+        }
+      },
+      "StreamEventResult": {
+        "type": "object",
+        "required": ["type", "queryIndex", "providerId", "progress", "result"],
+        "properties": {
+          "type": { "type": "string", "enum": ["result"] },
+          "queryIndex": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Индекс строки в `meta.queries`"
+          },
+          "providerId": { "type": "string", "description": "Id модели" },
+          "progress": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100,
+            "description": "Процент завершённых ячеек (0–100)"
+          },
+          "result": {
+            "$ref": "#/components/schemas/ProviderResult",
+            "description": "Ответ одной модели для одной ячейки"
+          }
+        }
+      },
+      "StreamEventDone": {
+        "type": "object",
+        "required": ["type", "skippedLabels"],
+        "properties": {
+          "type": { "type": "string", "enum": ["done"] },
+          "skippedLabels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Те же пропущенные модели, что в `meta`"
+          }
+        }
+      },
+      "StreamEventError": {
+        "type": "object",
+        "required": ["type", "message"],
+        "properties": {
+          "type": { "type": "string", "enum": ["error"] },
+          "message": { "type": "string", "description": "Текст ошибки (например, нет провайдеров)" },
+          "skippedLabels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Опционально, при ошибке выбора провайдеров"
+          }
+        }
+      },
+      "StreamEvent": {
+        "description": "Один JSON в строке `data:` SSE",
+        "oneOf": [
+          { "$ref": "#/components/schemas/StreamEventMeta" },
+          { "$ref": "#/components/schemas/StreamEventResult" },
+          { "$ref": "#/components/schemas/StreamEventDone" },
+          { "$ref": "#/components/schemas/StreamEventError" }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "meta": "#/components/schemas/StreamEventMeta",
+            "result": "#/components/schemas/StreamEventResult",
+            "done": "#/components/schemas/StreamEventDone",
+            "error": "#/components/schemas/StreamEventError"
           }
         }
       },

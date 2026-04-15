@@ -1,7 +1,7 @@
 {
   "info": {
     "name": "AI Searcher",
-    "description": "Только POST /api/query. Если в .env задан API_SECRET — включите Authorization: Bearer {{apiSecret}} или X-API-Key.",
+    "description": "POST /api/query (JSON) и POST /api/query/stream (SSE, text/event-stream). Если в .env задан API_SECRET — включите Authorization: Bearer {{apiSecret}} или X-API-Key.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -58,6 +58,37 @@
           "raw": "{\n  \"queries\": [\"запрос один\", \"запрос два\"],\n  \"providers\": [\"all\"]\n}"
         },
         "url": "{{baseUrl}}/api/query"
+      }
+    },
+    {
+      "name": "POST /api/query/stream — SSE (пакет)",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          {
+            "key": "Accept",
+            "value": "text/event-stream",
+            "description": "Подсказка клиенту; сервер всё равно отдаёт event-stream при успехе"
+          },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiSecret}}",
+            "type": "text",
+            "disabled": true
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{apiSecret}}",
+            "type": "text",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"queries\": [\"запрос один\", \"запрос два\"],\n  \"providers\": [\"all\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/query/stream"
       }
     }
   ]
