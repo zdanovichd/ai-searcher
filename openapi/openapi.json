@@ -26,7 +26,7 @@
       "post": {
         "tags": ["Query"],
         "summary": "Запрос к выбранным моделям",
-        "description": "Либо одно поле **`query`**, либо массив **`queries`** (пакет до 100 строк). Пустые строки в `queries` отбрасываются. Поле **`providers`**: `[\"all\"]` или список id: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`.",
+        "description": "Либо одно поле **`query`**, либо массив **`queries`** (пакет до 120 строк). Пустые строки в `queries` отбрасываются. Поле **`providers`**: `[\"all\"]` или список id: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`.",
         "operationId": "postQuery",
         "requestBody": {
           "required": true,
@@ -185,7 +185,7 @@
             "type": "array",
             "items": { "type": "string", "minLength": 1, "maxLength": 8000 },
             "minItems": 1,
-            "maxItems": 100,
+            "maxItems": 120,
             "description": "Каждый элемент — отдельный пользовательский запрос"
           },
           "providers": { "$ref": "#/components/schemas/ProvidersSelection" }

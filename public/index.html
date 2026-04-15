@@ -11,7 +11,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=9" />
+    <link rel="stylesheet" href="/styles.css?v=10" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
@@ -19,7 +19,7 @@
       <h1>AI Searcher</h1>
       <p class="lead">
         Ответы от выбранных моделей и ссылки из текста. Несколько запросов — списком: <strong>каждая строка</strong> —
-        отдельный запрос (до 100 строк); на сервере пакет обрабатывается параллельно (с ограничением одновременных
+        отдельный запрос (до 120 строк); на сервере пакет обрабатывается параллельно (с ограничением одновременных
         пакетов). У каждой модели — блок <strong>Токены</strong> (вход / выход / всего). Результаты можно скачать в
         Excel. API: <a href="/api-docs/">Swagger</a> · <a href="/openapi.json">OpenAPI JSON</a>.
       </p>
@@ -34,7 +34,7 @@
           placeholder="Одна строка — один запрос. Пример:&#10;запрос A&#10;запрос B"
         ></textarea>
         <p class="field-hint">
-          До 100 строк; пустые строки игнорируются. Один запрос не может занимать несколько строк — переносы внутри
+          До 120 строк; пустые строки игнорируются. Один запрос не может занимать несколько строк — переносы внутри
           фразы разбивают её на отдельные запросы. Модели без ключа в <code>.env</code> сервер пропустит; подсказка
           появится после ответа.
         </p>
@@ -60,6 +60,6 @@
       <section id="results" class="results" aria-live="polite"></section>
     </main>
 
-    <script src="/app.js?v=9" type="module"></script>
+    <script src="/app.js?v=10" type="module"></script>
   </body>
 </html>

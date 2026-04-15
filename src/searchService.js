@@ -11,7 +11,7 @@ const BATCH_QUERY_CONCURRENCY = Math.max(
   Math.min(16, Number(process.env.BATCH_QUERY_CONCURRENCY) || 4)
 );
 
-export const MAX_BATCH_QUERIES = 100;
+export const MAX_BATCH_QUERIES = 120;
 
 /**
  * @template T, R

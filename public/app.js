@@ -6,7 +6,7 @@ const resultsEl = document.getElementById("results");
 const providerList = document.getElementById("provider-list");
 const allCheckbox = document.querySelector('input[name="all"]');
 
-const MAX_BATCH_QUERIES = 100;
+const MAX_BATCH_QUERIES = 120;
 const EXCEL_CELL_MAX = 32000;
 
 /** Совпадает с сервером (без /api/meta): id для POST /api/query. */
