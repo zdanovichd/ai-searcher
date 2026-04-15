@@ -1,0 +1,248 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "AI Searcher API",
+    "description": "Запрос к нескольким LLM-провайдерам за один вызов. Ключи провайдеров задаются на сервере в `.env`. Если задан `API_SECRET`, передайте **Authorization: Bearer** или **X-API-Key**.",
+    "version": "1.0.0"
+  },
+  "servers": [
+    {
+      "url": "https://gpt.seo-performance.ru",
+      "description": "Продакшен"
+    },
+    {
+      "url": "http://localhost:3847",
+      "description": "Локально (порт по умолчанию из `PORT`)"
+    }
+  ],
+  "tags": [
+    {
+      "name": "Query",
+      "description": "Поиск по моделям"
+    }
+  ],
+  "paths": {
+    "/api/query": {
+      "post": {
+        "tags": ["Query"],
+        "summary": "Запрос к выбранным моделям",
+        "description": "Либо одно поле **`query`**, либо массив **`queries`** (пакет до 100 строк). Пустые строки в `queries` отбрасываются. Поле **`providers`**: `[\"all\"]` или список id: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`.",
+        "operationId": "postQuery",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  { "$ref": "#/components/schemas/SingleQueryRequest" },
+                  { "$ref": "#/components/schemas/BatchQueryRequest" }
+                ]
+              },
+              "examples": {
+                "singleAll": {
+                  "summary": "Один запрос, все настроенные модели",
+                  "value": {
+                    "query": "лучшее SEO-агентство в Москве",
+                    "providers": ["all"]
+                  }
+                },
+                "singleSubset": {
+                  "summary": "Один запрос, две модели",
+                  "value": {
+                    "query": "что такое structured data",
+                    "providers": ["chatgpt", "google"]
+                  }
+                },
+                "batch": {
+                  "summary": "Пакет запросов",
+                  "value": {
+                    "queries": ["первый запрос", "второй запрос"],
+                    "providers": ["all"]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Успех (одиночный или пакетный ответ)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    { "$ref": "#/components/schemas/SingleQueryResponse" },
+                    { "$ref": "#/components/schemas/BatchQueryResponse" }
+                  ]
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Пустой/длинный запрос, нет провайдеров, ошибка валидации",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" },
+                "examples": {
+                  "empty": { "value": { "error": "Пустой запрос" } },
+                  "noProviders": {
+                    "value": {
+                      "error": "Ни один провайдер не выбран или не настроен (проверьте .env).",
+                      "results": [],
+                      "skippedLabels": ["ChatGPT", "DeepSeek"]
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "На сервере задан `API_SECRET`, заголовок авторизации неверный или отсутствует",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          },
+          "500": {
+            "description": "Внутренняя ошибка сервера",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/ErrorResponse" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Тот же секрет, что в `API_SECRET` (если переменная задана). Иначе заголовок не нужен."
+      },
+      "apiKeyHeader": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "X-API-Key",
+        "description": "Альтернатива Bearer; значение = `API_SECRET`."
+      }
+    },
+    "schemas": {
+      "ProviderId": {
+        "type": "string",
+        "enum": ["all", "chatgpt", "deepseek", "perplexity", "google", "alice"]
+      },
+      "ProvidersSelection": {
+        "type": "array",
+        "items": { "$ref": "#/components/schemas/ProviderId" },
+        "description": "Пустой или неизвестный id → как `['all']`."
+      },
+      "TokenUsage": {
+        "type": "object",
+        "nullable": true,
+        "properties": {
+          "input": { "type": "integer", "nullable": true, "description": "Prompt / вход" },
+          "output": { "type": "integer", "nullable": true, "description": "Completion / выход" },
+          "total": { "type": "integer", "nullable": true }
+        }
+      },
+      "ProviderResult": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "text": { "type": "string" },
+          "links": {
+            "type": "array",
+            "items": { "type": "string", "format": "uri" }
+          },
+          "usage": { "$ref": "#/components/schemas/TokenUsage" },
+          "error": { "type": "string", "description": "Если модель вернула ошибку" },
+          "durationMs": { "type": "integer" }
+        }
+      },
+      "SingleQueryRequest": {
+        "type": "object",
+        "required": ["query"],
+        "properties": {
+          "query": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 8000,
+            "description": "Текст запроса"
+          },
+          "providers": { "$ref": "#/components/schemas/ProvidersSelection" }
+        }
+      },
+      "BatchQueryRequest": {
+        "type": "object",
+        "required": ["queries"],
+        "properties": {
+          "queries": {
+            "type": "array",
+            "items": { "type": "string", "minLength": 1, "maxLength": 8000 },
+            "minItems": 1,
+            "maxItems": 100,
+            "description": "Каждый элемент — отдельный пользовательский запрос"
+          },
+          "providers": { "$ref": "#/components/schemas/ProvidersSelection" }
+        }
+      },
+      "SingleQueryResponse": {
+        "type": "object",
+        "required": ["results", "skippedLabels"],
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProviderResult" }
+          },
+          "skippedLabels": {
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Подписи провайдеров без ключа в .env"
+          },
+          "error": { "type": "string", "nullable": true }
+        }
+      },
+      "BatchItem": {
+        "type": "object",
+        "properties": {
+          "query": { "type": "string" },
+          "error": { "type": "string", "nullable": true },
+          "results": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/ProviderResult" }
+          }
+        }
+      },
+      "BatchQueryResponse": {
+        "type": "object",
+        "required": ["batch", "items", "skippedLabels"],
+        "properties": {
+          "batch": { "type": "boolean", "enum": [true] },
+          "items": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/BatchItem" }
+          },
+          "skippedLabels": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": { "type": "string" },
+          "results": { "type": "array", "nullable": true },
+          "skippedLabels": { "type": "array", "items": { "type": "string" }, "nullable": true },
+          "batch": { "type": "boolean", "nullable": true },
+          "items": { "type": "array", "nullable": true }
+        }
+      }
+    }
+  }
+}

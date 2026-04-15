@@ -1,0 +1,64 @@
+{
+  "info": {
+    "name": "AI Searcher",
+    "description": "Только POST /api/query. Если в .env задан API_SECRET — включите Authorization: Bearer {{apiSecret}} или X-API-Key.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:3847" },
+    { "key": "apiSecret", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "POST /api/query — один запрос",
+      "request": {
+        "method": "POST",
+        "header": [
+          { "key": "Content-Type", "value": "application/json" },
+          {
+            "key": "Authorization",
+            "value": "Bearer {{apiSecret}}",
+            "type": "text",
+            "disabled": true,
+            "description": "Включите, если на сервере задан API_SECRET"
+          },
+          {
+            "key": "X-API-Key",
+            "value": "{{apiSecret}}",
+            "type": "text",
+            "disabled": true
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"лучшее SEO-агентство в Москве\",\n  \"providers\": [\"all\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/query"
+      }
+    },
+    {
+      "name": "POST /api/query — выбранные модели",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"query\": \"кратко: что такое structured data\",\n  \"providers\": [\"chatgpt\", \"google\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/query"
+      }
+    },
+    {
+      "name": "POST /api/query — пакет",
+      "request": {
+        "method": "POST",
+        "header": [{ "key": "Content-Type", "value": "application/json" }],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"queries\": [\"запрос один\", \"запрос два\"],\n  \"providers\": [\"all\"]\n}"
+        },
+        "url": "{{baseUrl}}/api/query"
+      }
+    }
+  ]
+}

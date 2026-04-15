@@ -11,16 +11,17 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/styles.css?v=3" />
+    <link rel="stylesheet" href="/styles.css?v=9" />
   </head>
   <body>
     <div class="noise" aria-hidden="true"></div>
     <header class="top">
       <h1>AI Searcher</h1>
       <p class="lead">
-        Один запрос — ответы от выбранных моделей и ссылки из текста. У каждой модели под заголовком блок
-        <strong>Токены</strong> (вход / выход / всего за запрос). Остаток квоты по ключу API провайдеры обычно не
-        присылают.
+        Ответы от выбранных моделей и ссылки из текста. Несколько запросов — списком: <strong>каждая строка</strong> —
+        отдельный запрос (до 100 строк); на сервере пакет обрабатывается параллельно (с ограничением одновременных
+        пакетов). У каждой модели — блок <strong>Токены</strong> (вход / выход / всего). Результаты можно скачать в
+        Excel. API: <a href="/api-docs/">Swagger</a> · <a href="/openapi.json">OpenAPI JSON</a>.
       </p>
     </header>
 
@@ -29,9 +30,14 @@
         <label for="q">Запрос</label>
         <textarea
           id="q"
-          rows="4"
-          placeholder="Например: лучшее SEO-агентство в Москве"
+          rows="5"
+          placeholder="Одна строка — один запрос. Пример:&#10;запрос A&#10;запрос B"
         ></textarea>
+        <p class="field-hint">
+          До 100 строк; пустые строки игнорируются. Один запрос не может занимать несколько строк — переносы внутри
+          фразы разбивают её на отдельные запросы. Модели без ключа в <code>.env</code> сервер пропустит; подсказка
+          появится после ответа.
+        </p>
 
         <fieldset class="providers">
           <legend>Модели</legend>
@@ -42,13 +48,18 @@
           <div id="provider-list" class="provider-list"></div>
         </fieldset>
 
-        <button type="button" id="run" class="btn">Спросить</button>
+        <div class="actions">
+          <button type="button" id="run" class="btn">Спросить</button>
+          <button type="button" id="export-xlsx" class="btn btn-secondary" disabled>
+            Скачать Excel
+          </button>
+        </div>
         <p id="status" class="status" role="status"></p>
       </section>
 
       <section id="results" class="results" aria-live="polite"></section>
     </main>
 
-    <script src="/app.js?v=3" type="module"></script>
+    <script src="/app.js?v=9" type="module"></script>
   </body>
 </html>

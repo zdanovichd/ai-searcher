@@ -5,6 +5,8 @@
 ## Возможности
 
 - Ввод запроса на естественном языке (например, подбор SEO-агентств, сервисов, обзоров).
+- **Пакет запросов:** в поле ввода **список** — каждая непустая строка это отдельный запрос (до 100 строк). На сервере пакет обрабатывается **параллельно** с ограничением одновременных запросов (переменная `BATCH_QUERY_CONCURRENCY`, по умолчанию 4); внутри одного пользовательского запроса модели по-прежнему опрашиваются параллельно.
+- **Экспорт в Excel** (`.xlsx`) по кнопке в интерфейсе: таблица с запросом, моделью, ошибкой, длительностью, токенами, текстом и ссылками.
 - Выбор **всех настроенных** моделей или **отдельных** (чекбоксы в интерфейсе).
 - Провайдеры: **ChatGPT** (OpenAI), **DeepSeek**, **Perplexity**, **Google Gemini**, **Алиса AI** (Yandex Cloud).
 - REST API для интеграций.
@@ -75,8 +77,14 @@ cp .env.example .env
 - `PERPLEXITY_MODEL` — по умолчанию `sonar`
 - `GOOGLE_GEMINI_MODEL` — если не задано, используется цепочка моделей (`gemini-2.5-flash`, затем запасные варианты)
 - `PORT` — порт HTTP-сервера (по умолчанию `3847`)
+- `BATCH_QUERY_CONCURRENCY` — сколько запросов из пакета выполнять одновременно на сервере (1…16, по умолчанию `4`)
+- `API_SECRET` — если задан, для **`POST /api/query`** нужен заголовок **`Authorization: Bearer …`** или **`X-API-Key`** с тем же значением (Postman, скрипты)
 
 Файл `.env` не должен попадать в git (уже в `.gitignore`).
+
+## «fetch failed» у всех моделей сразу
+
+Запросы к внешним API идут **из процесса Node**, не из браузера. Мгновенная ошибка обычно значит отсутствие исходящего HTTPS, DNS, файрвол/VPN или запуск без сети. В тексте ошибки в карточке выводится **цепочка `cause`** (код, syscall и т.д.). Проверьте `curl` к API провайдера с той же машины.
 
 ## Запуск
 
@@ -84,21 +92,51 @@ cp .env.example .env
 npm start
 ```
 
-Откройте в браузере: [http://localhost:3847](http://localhost:3847) (или `http://localhost:$PORT`).
+Откройте в браузере: [http://localhost:3847](http://localhost:3847) (или `http://localhost:$PORT`). Локально сервер **без TLS**: не используйте `https://` на порту Node — иначе браузер покажет «invalid response» / странные коды ошибок.
 
 То же самое поднимает `node alice-ai.js`.
 
 ## HTTP API
 
-### `GET /api/meta`
+Вызовы — обычный **JSON по HTTP**. Базовый URL: `http://<хост>:<PORT>` (локально чаще `http://localhost:3847`). Заголовок запроса: **`Content-Type: application/json`**.
 
-Список провайдеров и флаг, задан ли для каждого ключ в `.env`.
+### Swagger (OpenAPI)
 
-**Ответ:** `{ "providers": [ { "id", "label", "configured" }, ... ] }`
+После запуска сервера:
+
+- **Swagger UI:** [https://gpt.seo-performance.ru/api-docs/](https://gpt.seo-performance.ru/api-docs/) или локально [http://localhost:3847/api-docs/](http://localhost:3847/api-docs/) — «Try it out» для `POST /api/query`. Адрес без завершающего слэша (`/api-docs`) редиректит на `/api-docs/`.
+- **Спецификация:** [http://localhost:3847/openapi.json](http://localhost:3847/openapi.json) — тот же контракт в файле репозитория: `openapi/openapi.json` (импорт в Postman / другие генераторы).
+
+На проде за nginx нужно проксировать пути **`/api-docs`** (и вложенные статические ресурсы Swagger), **`/openapi.json`**, плюс **`POST /api/query`**.
+
+### Postman
+
+1. Импорт: **File → Import** → файл **`postman/ai-searcher.postman_collection.json`** из репозитория.
+2. Переменная **`baseUrl`**: `http://localhost:3847` или ваш публичный URL (если nginx проксирует **`POST /api/query`** на Node).
+3. **`apiSecret`**: заполните, если в `.env` задан **`API_SECRET`**, и включите заголовок в запросе коллекции.
+
+**Пример curl (один запрос):**
+
+```bash
+curl -sS -X POST "http://localhost:3847/api/query" \
+  -H "Content-Type: application/json" \
+  -d '{"query":"тест","providers":["google","chatgpt"]}'
+```
+
+**С секретом:**
+
+```bash
+curl -sS -X POST "http://localhost:3847/api/query" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer ВАШ_API_SECRET" \
+  -d '{"query":"тест","providers":["all"]}'
+```
+
+Публичный HTTP API — **только** `POST /api/query`.
 
 ### `POST /api/query`
 
-**Тело (JSON):**
+**Один запрос — тело (JSON):**
 
 ```json
 {
@@ -110,10 +148,26 @@ npm start
 - `query` — строка, 1…8000 символов.
 - `providers` — массив из `["all"]` или идентификаторов: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`. Пустой или некорректный массив трактуется как `["all"]`.
 
-**Успешный ответ:** `{ "results", "skippedLabels", "error": null }`
+**Несколько запросов — тело (JSON):**
+
+```json
+{
+  "queries": ["первый запрос", "второй запрос"],
+  "providers": ["chatgpt", "deepseek"]
+}
+```
+
+- `queries` — массив непустых строк, каждая до 8000 символов, не более 100 элементов (константа `MAX_BATCH_QUERIES` в `src/searchService.js`).
+- Параллельное выполнение элементов пакета ограничивается `BATCH_QUERY_CONCURRENCY` (см. `.env.example`).
+
+**Успешный ответ (один запрос):** `{ "results", "skippedLabels", "error": null }`
 
 - `results[]` — для каждой модели: `id`, `label`, `text`, `links[]`, `durationMs`, при успехе — `usage`: `{ input, output, total }` (токены prompt / completion / всего за **этот** запрос; остаток квоты API не возвращается), при ошибке — поле `error`.
 - `skippedLabels` — человекочитаемые названия провайдеров без ключей в `.env`.
+
+**Успешный ответ (пакет):** `{ "batch": true, "items", "skippedLabels" }`
+
+- `items[]` — для каждого пользовательского запроса: `query`, `error` (если не удалось запустить провайдеров), `results[]` (тот же формат, что и в одиночном ответе).
 
 ## Где в API смотреть токены (официально)
 
@@ -144,6 +198,8 @@ npm start
 ```
 ├── server.js           # Express, маршруты API и раздача public/
 ├── alice-ai.js         # Точка входа: импортирует server.js
+├── openapi/            # openapi.json — контракт API (Swagger UI: /api-docs/)
+├── postman/            # Коллекция Postman
 ├── public/             # Статика: интерфейс (HTML, CSS, JS)
 └── src/
     ├── providers.js    # Вызовы API провайдеров

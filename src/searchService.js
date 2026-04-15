@@ -5,6 +5,55 @@ import {
   runProvider,
 } from "./providers.js";
 
+/** Сколько пользовательских запросов в пакете обрабатывать параллельно (каждый всё ещё дергает все модели сразу). */
+const BATCH_QUERY_CONCURRENCY = Math.max(
+  1,
+  Math.min(16, Number(process.env.BATCH_QUERY_CONCURRENCY) || 4)
+);
+
+export const MAX_BATCH_QUERIES = 100;
+
+/**
+ * @template T, R
+ * @param {T[]} array
+ * @param {number} poolSize
+ * @param {(item: T, index: number) => Promise<R>} mapper
+ * @returns {Promise<R[]>}
+ */
+async function mapPool(array, poolSize, mapper) {
+  const results = new Array(array.length);
+  let nextIndex = 0;
+  async function worker() {
+    for (;;) {
+      const i = nextIndex++;
+      if (i >= array.length) break;
+      results[i] = await mapper(array[i], i);
+    }
+  }
+  const n = Math.min(Math.max(1, poolSize), array.length);
+  await Promise.all(Array.from({ length: n }, () => worker()));
+  return results;
+}
+
+/**
+ * Несколько запросов: внутри пакета — ограниченный параллелизм; у каждого запроса провайдеры по-прежнему параллельно.
+ *
+ * @param {string[]} queries
+ * @param {string[]} selectedIds
+ */
+export async function searchBatchAcrossProviders(queries, selectedIds) {
+  const skippedLabels = skippedLabelsFrom(getConfiguredProviders());
+  const items = await mapPool(queries, BATCH_QUERY_CONCURRENCY, async (query) => {
+    const out = await searchAcrossProviders(query, selectedIds);
+    return {
+      query,
+      results: out.results,
+      error: out.error,
+    };
+  });
+  return { batch: true, items, skippedLabels };
+}
+
 /**
  * @param {string} query
  * @param {string[]} selectedIds — список id или ['all']

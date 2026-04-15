@@ -1,4 +1,5 @@
 import { extractLinks } from "./extractLinks.js";
+import { explainNetworkError } from "./networkError.js";
 import { SEARCH_SYSTEM_PROMPT } from "./prompt.js";
 import {
   extractResponsesOutputText,
@@ -97,7 +98,7 @@ export async function runProvider(id, query) {
     return { id, label, text: text.trim(), links, usage, durationMs };
   } catch (e) {
     const durationMs = Date.now() - t0;
-    let msg = e?.message || String(e);
+    let msg = explainNetworkError(e);
     if (id === "deepseek" && /402|Insufficient Balance|insufficient balance/i.test(msg)) {
       msg =
         "402: на счёте DeepSeek нет средств. Пополните баланс в личном кабинете platform.deepseek.com.";
@@ -257,18 +258,26 @@ async function geminiChat(query) {
   const candidates = [...new Set([...(requested ? [requested] : []), ...GEMINI_MODEL_FALLBACKS])];
 
   let lastMessage = "";
-  for (const model of candidates) {
+  for (let i = 0; i < candidates.length; i++) {
+    const model = candidates[i];
     try {
       return await geminiGenerateOnce(apiKey, model, query);
     } catch (e) {
       lastMessage = e?.message || String(e);
-      const retry =
-        /not found|is not found|not supported for generateContent|404/i.test(lastMessage);
-      if (!retry) throw e;
+      const tryNextModel =
+        /not found|is not found|not supported for generateContent|404/i.test(lastMessage) ||
+        /high demand|overloaded|rate limit|too many requests|resource.?exhausted|temporarily unavailable|try again later|capacity|quota|unavailable|503|429/i.test(
+          lastMessage
+        );
+      if (!tryNextModel) throw e;
+      const hasNext = i < candidates.length - 1;
+      if (hasNext && /high demand|overloaded|try again later|429|503/i.test(lastMessage)) {
+        await new Promise((r) => setTimeout(r, 600));
+      }
     }
   }
   throw new Error(
-    `${lastMessage} Задайте рабочую модель в GOOGLE_GEMINI_MODEL или проверьте список: GET https://generativelanguage.googleapis.com/v1beta/models?key=...`
+    `${lastMessage} Переполнение/лимиты у выбранных моделей. Задайте GOOGLE_GEMINI_MODEL или повторите запрос позже. Список моделей: GET https://generativelanguage.googleapis.com/v1beta/models?key=...`
   );
 }
 
