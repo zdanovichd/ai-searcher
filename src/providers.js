@@ -8,14 +8,22 @@ import {
   usageHarvestResponses,
 } from "./tokenUsage.js";
 
-export const PROVIDER_IDS = ["chatgpt", "deepseek", "perplexity", "google", "alice"];
+export const PROVIDER_IDS = [
+  "chatgpt",
+  "deepseek",
+  "perplexity",
+  "google",
+  "alice",
+  "alice_search",
+];
 
 export const PROVIDER_LABELS = {
   chatgpt: "ChatGPT",
   deepseek: "DeepSeek",
   perplexity: "Perplexity",
   google: "Google AI (Gemini)",
-  alice: "Алиса AI (Yandex)",
+  alice: "Алиса AI (Yandex Cloud LLM)",
+  alice_search: "Алиса в Поиске (Yandex Search API)",
 };
 
 const TIMEOUT_MS = 120_000;
@@ -28,6 +36,10 @@ export function getConfiguredProviders() {
     google: Boolean(process.env.GOOGLE_AI_API_KEY?.trim()),
     alice: Boolean(
       process.env.YANDEX_CLOUD_API_KEY?.trim() && process.env.YANDEX_CLOUD_FOLDER_ID?.trim()
+    ),
+    alice_search: Boolean(
+      (process.env.YANDEX_GEN_SEARCH_API_KEY?.trim() || process.env.YANDEX_CLOUD_API_KEY?.trim()) &&
+        (process.env.YANDEX_GEN_SEARCH_FOLDER_ID?.trim() || process.env.YANDEX_CLOUD_FOLDER_ID?.trim())
     ),
   };
 }
@@ -90,6 +102,12 @@ export async function runProvider(id, query) {
         usage = out.usage;
         break;
       }
+      case "alice_search": {
+        const out = await yandexGenSearch(query);
+        text = out.text;
+        usage = out.usage;
+        break;
+      }
       default:
         throw new Error(`Неизвестный провайдер: ${id}`);
     }
@@ -122,6 +140,9 @@ function enrichGeoAndAuthHints(id, msg) {
   }
   if (id === "alice" && /403|Forbidden|401|permission|access/i.test(m)) {
     return `${m} — Для Yandex Cloud: проверьте, что ключ не отозван и тип подходит (API-ключ сервисного аккаунта); у аккаунта есть роль вроде ai.languageModels.user; YANDEX_CLOUD_FOLDER_ID — id именно того каталога, где включён доступ к модели Alice; модель доступна в каталоге. Запрос с зарубежного VPS иногда даёт отказ — при необходимости вызывайте API с IP/из окружения, разрешённого политикой облака.`;
+  }
+  if (id === "alice_search" && /403|Forbidden|401|permission|access|api key|IAM/i.test(m)) {
+    return `${m} — Для Yandex Search API (генеративный поиск): нужен API-ключ или IAM-токен, каталог с подключённым Search API и права вроде search-api.editor / search-api.viewer на каталог. Переменные YANDEX_GEN_SEARCH_* или те же YANDEX_CLOUD_API_KEY и YANDEX_CLOUD_FOLDER_ID. URL по умолчанию: searchapi.api.cloud.yandex.net/v2/gen/search.`;
   }
   return m;
 }
@@ -361,4 +382,148 @@ async function yandexAlice(query) {
   const usage = usageHarvestResponses(data);
 
   return { text, usage };
+}
+
+const DEFAULT_GEN_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/gen/search";
+
+/**
+ * Генеративный ответ по веб-поиску Яндекса (Yandex Cloud Search API, GenSearchService).
+ * Это не HTML-выдача yandex.ru, а официальный API «поиск + модель» для разработчиков.
+ *
+ * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ */
+async function yandexGenSearch(query) {
+  const folderId =
+    process.env.YANDEX_GEN_SEARCH_FOLDER_ID?.trim() || process.env.YANDEX_CLOUD_FOLDER_ID?.trim();
+  const apiKey =
+    process.env.YANDEX_GEN_SEARCH_API_KEY?.trim() || process.env.YANDEX_CLOUD_API_KEY?.trim();
+  if (!folderId || !apiKey) {
+    throw new Error(
+      "Задайте каталог и ключ: YANDEX_GEN_SEARCH_FOLDER_ID + YANDEX_GEN_SEARCH_API_KEY или YANDEX_CLOUD_FOLDER_ID + YANDEX_CLOUD_API_KEY"
+    );
+  }
+
+  const url = process.env.YANDEX_GEN_SEARCH_URL?.trim() || DEFAULT_GEN_SEARCH_URL;
+  const searchType =
+    process.env.YANDEX_GEN_SEARCH_SEARCH_TYPE?.trim() || "SEARCH_TYPE_RU";
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    signal: AbortSignal.timeout(TIMEOUT_MS),
+    body: JSON.stringify({
+      folderId,
+      messages: [{ role: "ROLE_USER", content: query }],
+      searchType,
+      fixMisspell: true,
+      getPartialResults: false,
+    }),
+  });
+
+  const rawText = await res.text();
+  if (!res.ok) {
+    let msg = res.statusText || "Yandex Gen Search API error";
+    try {
+      const errJson = JSON.parse(rawText);
+      if (typeof errJson?.message === "string") msg = errJson.message;
+    } catch {
+      if (rawText?.trim()) msg = rawText.trim().slice(0, 500);
+    }
+    throw new Error(msg);
+  }
+
+  const chunks = parseGenSearchNdjsonOrJson(rawText);
+  const text = formatGenSearchAnswer(chunks);
+  if (!text?.trim()) throw new Error("Пустой ответ генеративного поиска");
+
+  return { text, usage: null };
+}
+
+/**
+ * @param {string} rawText
+ * @returns {Record<string, unknown>[]}
+ */
+function parseGenSearchNdjsonOrJson(rawText) {
+  const t = rawText.trim();
+  if (!t) return [];
+  try {
+    const one = JSON.parse(t);
+    if (Array.isArray(one)) return one;
+    if (one && typeof one === "object") return [one];
+  } catch {
+    // NDJSON: по строке на объект
+  }
+  const out = [];
+  for (const line of rawText.split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    try {
+      out.push(JSON.parse(s));
+    } catch {
+      // пропускаем не-JSON
+    }
+  }
+  return out;
+}
+
+/**
+ * @param {Record<string, unknown>[]} chunks
+ * @returns {string}
+ */
+function formatGenSearchAnswer(chunks) {
+  let longestAssistant = "";
+  let rejected = false;
+  let problematic = false;
+  /** @type {Map<string, { title: string, used?: boolean }>} */
+  const sourcesByUrl = new Map();
+
+  for (const c of chunks) {
+    if (!c || typeof c !== "object") continue;
+    if (c.isAnswerRejected === true) rejected = true;
+    if (c.problematicAnswer === true) problematic = true;
+    const msg = c.message;
+    if (msg && typeof msg === "object") {
+      const role = /** @type {any} */ (msg).role;
+      const isAssistant = role === "ROLE_ASSISTANT" || role === 2;
+      if (isAssistant && typeof /** @type {any} */ (msg).content === "string") {
+        const content = /** @type {any} */ (msg).content;
+        if (content.length > longestAssistant.length) longestAssistant = content;
+      }
+    }
+    const sources = c.sources;
+    if (Array.isArray(sources)) {
+      for (const s of sources) {
+        if (s && typeof s === "object" && typeof /** @type {any} */ (s).url === "string") {
+          const url = /** @type {any} */ (s).url;
+          const title = typeof /** @type {any} */ (s).title === "string" ? /** @type {any} */ (s).title : "";
+          const used = /** @type {any} */ (s).used;
+          sourcesByUrl.set(url, { title, used });
+        }
+      }
+    }
+  }
+
+  let text = longestAssistant.trim();
+  if (rejected && !text) {
+    text = "Ответ отклонён политикой сервиса (isAnswerRejected).";
+  }
+  const notes = [];
+  if (problematic) notes.push("Сервис пометил ответ как потенциально проблемный по содержанию.");
+  if (notes.length) text = `${text}\n\n_${notes.join(" ")}_`.trim();
+
+  if (sourcesByUrl.size > 0) {
+    const lines = ["", "---", "**Источники (Search API):**"];
+    for (const [url, { title, used }] of sourcesByUrl) {
+      const label = title?.trim() || url;
+      const usedNote =
+        used === true ? "" : used === false ? " _(не отмечен как использованный в ответе)_" : "";
+      lines.push(`- [${label}](${url})${usedNote}`);
+    }
+    text = `${text}\n${lines.join("\n")}`.trim();
+  }
+
+  return text;
 }

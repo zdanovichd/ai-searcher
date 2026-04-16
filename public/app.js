@@ -31,7 +31,8 @@ const UI_PROVIDERS = [
   { id: "deepseek", label: "DeepSeek" },
   { id: "perplexity", label: "Perplexity" },
   { id: "google", label: "Google AI (Gemini)" },
-  { id: "alice", label: "Алиса AI (Yandex)" },
+  { id: "alice", label: "Алиса AI (Yandex Cloud LLM)" },
+  { id: "alice_search", label: "Алиса в Поиске (Yandex Search API)" },
 ];
 
 /**

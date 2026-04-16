@@ -8,7 +8,7 @@
 - **Пакет запросов:** в поле ввода **список** — каждая непустая строка это отдельный запрос (до 120 строк). На сервере пакет обрабатывается **параллельно** с ограничением одновременных запросов (переменная `BATCH_QUERY_CONCURRENCY`, по умолчанию 4); внутри одного пользовательского запроса модели по-прежнему опрашиваются параллельно.
 - **Экспорт в Excel** (`.xlsx`) по кнопке в интерфейсе: таблица с запросом, моделью, ошибкой, длительностью, токенами, текстом и ссылками.
 - Выбор **всех настроенных** моделей или **отдельных** (чекбоксы в интерфейсе).
-- Провайдеры: **ChatGPT** (OpenAI), **DeepSeek**, **Perplexity**, **Google Gemini**, **Алиса AI** (Yandex Cloud).
+- Провайдеры: **ChatGPT** (OpenAI), **DeepSeek**, **Perplexity**, **Google Gemini**, **Алиса AI** (Yandex Cloud LLM), **Алиса в Поиске** (Yandex Cloud Search API — генеративный ответ по веб-поиску; не HTML-страница yandex.ru).
 - REST API для интеграций.
 
 ## Индексация поисковиками
@@ -67,8 +67,9 @@ cp .env.example .env
 | `DEEPSEEK_API_KEY` | DeepSeek |
 | `PERPLEXITY_API_KEY` | Perplexity ([консоль API](https://console.perplexity.ai/)) |
 | `GOOGLE_AI_API_KEY` | Gemini ([Google AI Studio](https://aistudio.google.com/apikey)) |
-| `YANDEX_CLOUD_FOLDER_ID`, `YANDEX_CLOUD_API_KEY` | Алиса AI |
+| `YANDEX_CLOUD_FOLDER_ID`, `YANDEX_CLOUD_API_KEY` | Алиса AI (облачная LLM) |
 | `YANDEX_CLOUD_MODEL` | Опционально, по умолчанию `aliceai-llm/latest` |
+| те же `YANDEX_CLOUD_*` или `YANDEX_GEN_SEARCH_*` | **Алиса в Поиске** (`alice_search`): [Search API, GenSearch](https://yandex.cloud/docs/search-api/) — в каталоге должен быть доступ к сервису и роли вроде `search-api.editor` у ключа |
 
 Дополнительно (необязательно):
 
@@ -146,7 +147,7 @@ curl -sS -X POST "http://localhost:3847/api/query" \
 ```
 
 - `query` — строка, 1…8000 символов.
-- `providers` — массив из `["all"]` или идентификаторов: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`. Пустой или некорректный массив трактуется как `["all"]`.
+- `providers` — массив из `["all"]` или идентификаторов: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`, `alice_search`. Пустой или некорректный массив трактуется как `["all"]`.
 
 **Несколько запросов — тело (JSON):**
 
@@ -180,18 +181,20 @@ curl -sS -X POST "http://localhost:3847/api/query" \
 | **Perplexity** | **`usage`** в ответе **`POST /v1/sonar`** (`prompt_tokens`, `completion_tokens`, `total_tokens`, плюс свои поля вроде `cost`) | [Sonar / chat completions](https://docs.perplexity.ai/api-reference/chat-completions-post) |
 | **Gemini** | **`usageMetadata`**: `promptTokenCount`, `candidatesTokenCount`, `totalTokenCount` | [generateContent — ответ](https://ai.google.dev/api/generate-content#v1beta.GenerateContentResponse) |
 | **Алиса** (Yandex, OpenAI-compatible Responses) | **`usage`**: `input_tokens`, `output_tokens`, `total_tokens` (как у OpenAI Responses API) | [OpenAI Responses — usage](https://platform.openai.com/docs/api-reference/responses/object#responses/object-usage) (совместимый контракт) |
+| **Алиса в Поиске** (`alice_search`, Yandex Search API GenSearch) | В ответе API **нет** нормализованного блока токенов — в UI поле **`usage`** будет **`null`** | [GenSearch в справке Search API](https://yandex.cloud/docs/search-api/api-ref/grpc/GenSearch/search) |
 
 **Лимиты и деньги** по ключу (остаток квоты, баланс) смотрите в **консолях биллинга** провайдера — в теле одного запроса это обычно не приходит.
 
 В коде разбор унифицирован в `src/tokenUsage.js` (разные имена полей сводятся к одному виду).
 
-**Реализация:** ChatGPT, DeepSeek, Perplexity и Yandex Алиса вызываются через **`fetch` + сырой JSON** (не OpenAI SDK), чтобы в ответе гарантированно читать `usage` так, как отдаёт провайдер. У Gemini по-прежнему `generateContent` по REST.
+**Реализация:** ChatGPT, DeepSeek, Perplexity, Yandex Алиса (LLM) и генеративный поиск Yandex вызываются через **`fetch` + сырой JSON** (не OpenAI SDK), чтобы в ответе гарантированно читать `usage` там, где провайдер его отдаёт. У Gemini по-прежнему `generateContent` по REST.
 
 ## Почему 403 (ChatGPT, Gemini, Алиса)
 
 - **OpenAI:** запрет по **геолокации IP** сервера («Country, region, or territory not supported»). Часто при VPS в РФ и ряде других регионов. Нужен исходящий трафик из поддерживаемой зоны (другой хостинг, прокси) или вызов API не с этого IP.
 - **Google Gemini (AI Studio):** аналогично — **«User location is not supported»** завязан на регион запроса; с IP РФ запрос с сервера часто отклоняется. Варианты: инфраструктура в поддерживаемом регионе, **Vertex AI** в GCP, прокси.
-- **Yandex Алиса:** `403 Forbidden` чаще про **права и ключ**: роль `ai.languageModels.user`, верный каталог в `YANDEX_CLOUD_FOLDER_ID`, неистёкший API-ключ, доступ к модели в каталоге. Иногда политика облака к иностранным IP — уточняйте в документации Yandex Cloud.
+- **Yandex Алиса (LLM):** `403 Forbidden` чаще про **права и ключ**: роль `ai.languageModels.user`, верный каталог в `YANDEX_CLOUD_FOLDER_ID`, неистёкший API-ключ, доступ к модели в каталоге. Иногда политика облака к иностранным IP — уточняйте в документации Yandex Cloud.
+- **Алиса в Поиске** (`alice_search`): отдельный продукт **Search API** в каталоге; без подключения сервиса и ролей на ключ будет отказ. Подробности — в [документации Search API](https://yandex.cloud/docs/search-api/).
 
 ## Структура проекта
 
@@ -215,6 +218,7 @@ curl -sS -X POST "http://localhost:3847/api/query" \
 - **Gemini:** идентификаторы моделей меняются; при ошибке «model not found» задайте рабочую модель в `GOOGLE_GEMINI_MODEL` или проверьте список:  
   `GET https://generativelanguage.googleapis.com/v1beta/models?key=ВАШ_КЛЮЧ`
 - **Perplexity:** вызов идёт на официальный **`POST /v1/sonar`** (не `/v1/chat/completions`), чтобы в ответе был блок **`usage`** с токенами. Модель по умолчанию — `sonar`, переопределение — `PERPLEXITY_MODEL`.
+- **`alice_search`:** это **GenSearch** в Yandex Cloud (поиск по индексу + генеративный ответ), а не скрейпинг страницы «Поиск с Алисой» в браузере. Ответ может приходить **чанками** (NDJSON); в конец текста добавляется блок **«Источники»** из поля `sources` API, если оно есть.
 
 ## Лицензия
 
