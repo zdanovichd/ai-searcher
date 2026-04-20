@@ -7,9 +7,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 cd "$PROJECT_ROOT"
+# Важно: не копировать .env — иначе локальный файл перезапишет секреты на сервере (в т.ч. закомментированные строки).
+# Логи на сервере тоже не трогаем.
 rsync -az --delete \
   --exclude node_modules \
   --exclude .git \
+  --exclude .env \
+  --exclude logs \
   -e "ssh -o BatchMode=yes" \
   ./ "$ROOT:$REMOTE_DIR/"
 
