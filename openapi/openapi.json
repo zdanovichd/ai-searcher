@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "AI Searcher API",
-    "description": "Запрос к нескольким LLM-провайдерам за один вызов: **`POST /api/query`** (JSON целиком) или **`POST /api/query/stream`** (SSE, по одной ячейке). Ключи провайдеров на сервере в `.env`. Если задан `API_SECRET` — **Authorization: Bearer** или **X-API-Key**.",
+    "description": "Запрос к нескольким LLM-провайдерам за один вызов: **`POST /api/query`** (JSON целиком) или **`POST /api/query/stream`** (SSE, по одной ячейке). **`GET /api/meta`** — какие модели настроены в `.env` (без секретов). Если задан `API_SECRET` — **Authorization: Bearer** или **X-API-Key** только для POST.",
     "version": "1.0.0"
   },
   "servers": [
@@ -22,6 +22,24 @@
     }
   ],
   "paths": {
+    "/api/meta": {
+      "get": {
+        "tags": ["Query"],
+        "summary": "Список моделей и настройка в .env",
+        "description": "Публично, **без** заголовка `API_SECRET`. Для UI: какие провайдеры доступны по ключам на сервере.",
+        "operationId": "getMeta",
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MetaResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/query": {
       "post": {
         "tags": ["Query"],
@@ -216,6 +234,28 @@
       }
     },
     "schemas": {
+      "MetaProviderEntry": {
+        "type": "object",
+        "required": ["id", "label", "configured"],
+        "properties": {
+          "id": { "type": "string", "description": "Id провайдера" },
+          "label": { "type": "string", "description": "Подпись для UI" },
+          "configured": {
+            "type": "boolean",
+            "description": "true, если на сервере заданы нужные переменные .env для этого провайдера"
+          }
+        }
+      },
+      "MetaResponse": {
+        "type": "object",
+        "required": ["providers"],
+        "properties": {
+          "providers": {
+            "type": "array",
+            "items": { "$ref": "#/components/schemas/MetaProviderEntry" }
+          }
+        }
+      },
       "ProviderId": {
         "type": "string",
         "enum": ["all", "chatgpt", "deepseek", "perplexity", "google", "alice", "alice_search"]

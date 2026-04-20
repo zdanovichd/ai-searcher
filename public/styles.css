@@ -185,6 +185,16 @@ body {
   margin-bottom: 0.25rem;
 }
 
+.chip-unavailable {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.chip-unavailable span {
+  text-decoration: line-through;
+  text-decoration-color: var(--muted);
+}
+
 .actions {
   margin-top: 1.25rem;
   display: flex;

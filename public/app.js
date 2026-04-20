@@ -25,7 +25,7 @@ const EXCEL_CELL_MAX = 32000;
 const ANSWER_PREVIEW_LINES = 4;
 const LINK_TILES_VISIBLE = 5;
 
-/** Совпадает с сервером (без /api/meta): id для POST /api/query. */
+/** Fallback до ответа GET /api/meta (тот же порядок id, что на сервере). */
 const UI_PROVIDERS = [
   { id: "chatgpt", label: "ChatGPT" },
   { id: "deepseek", label: "DeepSeek" },
@@ -34,6 +34,9 @@ const UI_PROVIDERS = [
   { id: "alice", label: "Алиса AI (Yandex Cloud LLM)" },
   { id: "alice_search", label: "Алиса в Поиске (Yandex Search API)" },
 ];
+
+/** @type {{ id: string, label: string, configured: boolean }[]} */
+let providerMeta = UI_PROVIDERS.map((p) => ({ ...p, configured: true }));
 
 /**
  * @type {{
@@ -164,40 +167,72 @@ function splitInputQueries(raw) {
     .filter(Boolean);
 }
 
+function syncProviderChipInputs() {
+  const allOn = allCheckbox.checked;
+  providerList.querySelectorAll('input[name="provider"]').forEach((inp) => {
+    const unavailable = inp.dataset.configured === "false";
+    if (allOn) {
+      inp.checked = false;
+      inp.disabled = true;
+    } else {
+      inp.disabled = unavailable;
+      if (unavailable) inp.checked = false;
+    }
+  });
+}
+
 function renderProviderChips() {
   providerList.innerHTML = "";
-  for (const p of UI_PROVIDERS) {
+  for (const p of providerMeta) {
     const label = document.createElement("label");
     label.className = "chip";
+    if (!p.configured) {
+      label.classList.add("chip-unavailable");
+      label.title = "Не настроено на сервере (нет ключа в .env)";
+    }
     const input = document.createElement("input");
     input.type = "checkbox";
     input.name = "provider";
     input.value = p.id;
     input.checked = false;
+    input.dataset.configured = p.configured ? "true" : "false";
+    input.disabled = !p.configured || allCheckbox.checked;
     const span = document.createElement("span");
     span.textContent = p.label;
     label.append(input, span);
     providerList.append(label);
   }
-  allCheckbox.dispatchEvent(new Event("change"));
+  syncProviderChipInputs();
+}
+
+async function refreshProviderMeta() {
+  try {
+    const r = await fetch("/api/meta");
+    if (!r.ok) throw new Error("meta");
+    const data = await r.json();
+    if (Array.isArray(data.providers) && data.providers.length) {
+      providerMeta = data.providers.map((x) => ({
+        id: String(x.id),
+        label: String(x.label ?? x.id),
+        configured: Boolean(x.configured),
+      }));
+    }
+  } catch {
+    /* оставляем текущий providerMeta */
+  }
+  renderProviderChips();
 }
 
 allCheckbox.addEventListener("change", () => {
-  const on = allCheckbox.checked;
-  providerList.querySelectorAll('input[name="provider"]').forEach((inp) => {
-    if (!inp.disabled) inp.checked = false;
-    inp.disabled = on;
-  });
+  syncProviderChipInputs();
 });
 
 providerList.addEventListener("change", () => {
   const any = [...providerList.querySelectorAll('input[name="provider"]:checked')].length;
   if (any) {
     allCheckbox.checked = false;
-    providerList.querySelectorAll('input[name="provider"]').forEach((inp) => {
-      inp.disabled = false;
-    });
   }
+  syncProviderChipInputs();
 });
 
 function selectedProviders() {
@@ -217,7 +252,7 @@ function escapeHtml(s) {
 }
 
 function providerLabel(id) {
-  return UI_PROVIDERS.find((p) => p.id === id)?.label || id;
+  return providerMeta.find((p) => p.id === id)?.label || id;
 }
 
 function fmtTok(n) {
@@ -809,4 +844,4 @@ setExportEnabled(false);
 showStreamProgress(false);
 streamActive = false;
 updateFloatingChrome();
-renderProviderChips();
+void refreshProviderMeta();

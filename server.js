@@ -4,24 +4,56 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import swaggerUi from "swagger-ui-express";
-import { PROVIDER_IDS } from "./src/providers.js";
+import {
+  PROVIDER_IDS,
+  PROVIDER_LABELS,
+  getConfiguredProviders,
+} from "./src/providers.js";
 import {
   MAX_BATCH_QUERIES,
   searchAcrossProviders,
   searchBatchAcrossProviders,
   streamSearchProgress,
 } from "./src/searchService.js";
+import {
+  getRequestLogContext,
+  logError,
+  logEvent,
+  logStartup,
+  registerGlobalErrorHandlers,
+  requestLoggerMiddleware,
+  summarizeQueryBody,
+} from "./src/logger.js";
+
+registerGlobalErrorHandlers();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) || 3847;
 
+/** За nginx / балансировщиком — для `req.ip` и X-Forwarded-For. Отключить: `TRUST_PROXY=0`. */
+app.set("trust proxy", process.env.TRUST_PROXY !== "0");
+
+app.use(requestLoggerMiddleware);
+
 app.use(express.json({ limit: "1mb" }));
 
-app.use((_req, res, next) => {
+app.use((req, res, next) => {
   res.setHeader("X-AI-Searcher", "1");
+  if (req.requestId) {
+    res.setHeader("X-Request-Id", req.requestId);
+  }
   next();
 });
+
+/**
+ * @param {(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => unknown | Promise<unknown>} fn
+ */
+function asyncRoute(fn) {
+  return (req, res, next) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
+}
 
 /** Если задан API_SECRET — POST /api/query только с заголовком (интеграции, Postman). */
 function requireApiSecret(req, res, next) {
@@ -42,6 +74,11 @@ function requireApiSecret(req, res, next) {
   }
   if (!ok && typeof key === "string" && key === secret) ok = true;
   if (!ok) {
+    logEvent("warn", "auth:rejected", {
+      ...getRequestLogContext(req),
+      hasAuthorization: Boolean(req.headers.authorization),
+      hasXApiKey: Boolean(req.headers["x-api-key"]),
+    });
     res.status(401).json({
       error:
         "Нужна авторизация: в .env задан API_SECRET. Передайте заголовок Authorization: Bearer <секрет> или X-API-Key: <секрет>.",
@@ -123,11 +160,30 @@ app.use((_req, res, next) => {
   next();
 });
 
+/** Публично: какие модели есть в билде и какие настроены в .env (без секретов). */
+app.get("/api/meta", (req, res, next) => {
+  try {
+    const configured = getConfiguredProviders();
+    const providers = PROVIDER_IDS.map((id) => ({
+      id,
+      label: PROVIDER_LABELS[id] ?? id,
+      configured: Boolean(configured[id]),
+    }));
+    res.json({ providers });
+  } catch (e) {
+    next(e);
+  }
+});
+
 const openApiPath = join(__dirname, "openapi", "openapi.json");
 let openApiSpec = null;
 try {
   openApiSpec = JSON.parse(readFileSync(openApiPath, "utf8"));
 } catch (e) {
+  logEvent("warn", "openapi:load_failed", {
+    message: e?.message || String(e),
+    stack: e instanceof Error ? e.stack : undefined,
+  });
   console.warn("OpenAPI:", e?.message || String(e));
 }
 if (openApiSpec) {
@@ -149,73 +205,144 @@ if (openApiSpec) {
 }
 
 /** Поток SSE: ячейки таблицы по мере готовности (JSON в событиях `data:`). */
-app.post("/api/query/stream", requireApiSecret, async (req, res) => {
-  const parsed = parseQueryBody(req.body);
-  if (!parsed.ok) {
-    res.status(parsed.status).json({ error: parsed.error });
-    return;
-  }
-  const { queries, selected } = parsed;
-  res.status(200);
-  res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-  if (typeof res.flushHeaders === "function") res.flushHeaders();
-
-  try {
-    await streamSearchProgress(queries, selected, (ev) => {
-      sseWrite(res, ev);
+app.post(
+  "/api/query/stream",
+  requireApiSecret,
+  asyncRoute(async (req, res) => {
+    logEvent("debug", "api:query_stream:body", {
+      ...getRequestLogContext(req),
+      ...summarizeQueryBody(req.body),
     });
-    res.end();
-  } catch (e) {
-    try {
-      sseWrite(res, { type: "error", message: e?.message || String(e) });
-    } catch (_) {
-      /* ignore */
+    const parsed = parseQueryBody(req.body);
+    if (!parsed.ok) {
+      logEvent("warn", "api:query_stream:validation", {
+        ...getRequestLogContext(req),
+        status: parsed.status,
+        error: parsed.error,
+        ...summarizeQueryBody(req.body),
+      });
+      res.status(parsed.status).json({ error: parsed.error });
+      return;
     }
-    res.end();
-  }
-});
+    const { queries, selected } = parsed;
+    logEvent("info", "api:query_stream:start", {
+      ...getRequestLogContext(req),
+      queryCount: queries.length,
+      providers: selected,
+    });
+    res.status(200);
+    res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+    if (typeof res.flushHeaders === "function") res.flushHeaders();
 
-app.post("/api/query", requireApiSecret, async (req, res) => {
-  const parsed = parseQueryBody(req.body);
-  if (!parsed.ok) {
-    res.status(parsed.status).json({ error: parsed.error });
-    return;
-  }
-  const { queries, selected, batchInput } = parsed;
-
-  if (batchInput) {
     try {
-      const out = await searchBatchAcrossProviders(queries, selected);
-      res.json(out);
+      await streamSearchProgress(queries, selected, (ev) => {
+        try {
+          sseWrite(res, ev);
+        } catch (writeErr) {
+          logError(writeErr, req, {
+            phase: "sseWrite",
+            eventType: ev?.type,
+          });
+        }
+      });
+      res.end();
+      logEvent("info", "api:query_stream:done", {
+        ...getRequestLogContext(req),
+        queryCount: queries.length,
+      });
     } catch (e) {
+      logError(e, req, { phase: "api:query_stream" });
+      try {
+        sseWrite(res, { type: "error", message: e?.message || String(e) });
+      } catch (_) {
+        /* ignore */
+      }
+      res.end();
+    }
+  })
+);
+
+app.post(
+  "/api/query",
+  requireApiSecret,
+  asyncRoute(async (req, res) => {
+    logEvent("debug", "api:query:body", {
+      ...getRequestLogContext(req),
+      ...summarizeQueryBody(req.body),
+    });
+    const parsed = parseQueryBody(req.body);
+    if (!parsed.ok) {
+      logEvent("warn", "api:query:validation", {
+        ...getRequestLogContext(req),
+        status: parsed.status,
+        error: parsed.error,
+        ...summarizeQueryBody(req.body),
+      });
+      res.status(parsed.status).json({ error: parsed.error });
+      return;
+    }
+    const { queries, selected, batchInput } = parsed;
+
+    if (batchInput) {
+      try {
+        logEvent("info", "api:query:batch:start", {
+          ...getRequestLogContext(req),
+          queryCount: queries.length,
+          providers: selected,
+        });
+        const out = await searchBatchAcrossProviders(queries, selected);
+        res.json(out);
+        logEvent("info", "api:query:batch:done", {
+          ...getRequestLogContext(req),
+          queryCount: queries.length,
+          items: out.items?.length,
+        });
+      } catch (e) {
+        logError(e, req, { phase: "api:query:batch" });
+        res.status(500).json({
+          error: e?.message || "Внутренняя ошибка",
+          batch: true,
+          items: [],
+          skippedLabels: [],
+        });
+      }
+      return;
+    }
+
+    try {
+      logEvent("info", "api:query:single:start", {
+        ...getRequestLogContext(req),
+        providers: selected,
+        queryChars: queries[0]?.length,
+      });
+      const out = await searchAcrossProviders(queries[0], selected);
+      if (out.error) {
+        logEvent("warn", "api:query:single:provider_error", {
+          ...getRequestLogContext(req),
+          error: out.error,
+          skippedLabels: out.skippedLabels,
+        });
+        res.status(400).json(out);
+        return;
+      }
+      res.json(out);
+      logEvent("info", "api:query:single:done", {
+        ...getRequestLogContext(req),
+        resultCount: out.results?.length,
+      });
+    } catch (e) {
+      logError(e, req, { phase: "api:query:single" });
       res.status(500).json({
         error: e?.message || "Внутренняя ошибка",
-        batch: true,
-        items: [],
+        results: [],
         skippedLabels: [],
       });
     }
-    return;
-  }
-
-  try {
-    const out = await searchAcrossProviders(queries[0], selected);
-    if (out.error) {
-      res.status(400).json(out);
-      return;
-    }
-    res.json(out);
-  } catch (e) {
-    res.status(500).json({
-      error: e?.message || "Внутренняя ошибка",
-      results: [],
-      skippedLabels: [],
-    });
-  }
-});
+  })
+);
 
 const publicDir = join(__dirname, "public");
 app.get("/", (_req, res) => {
@@ -224,6 +351,7 @@ app.get("/", (_req, res) => {
 app.use(express.static(publicDir));
 
 app.use((req, res) => {
+  logEvent("warn", "http:404", getRequestLogContext(req));
   const base = `http://127.0.0.1:${PORT}`;
   res.status(404).type("html").send(`<!DOCTYPE html>
 <html lang="ru"><meta charset="utf-8"><title>404</title>
@@ -236,7 +364,21 @@ app.use((req, res) => {
 </body></html>`);
 });
 
+app.use((err, req, res, next) => {
+  logError(err, req, { phase: "express_error_handler" });
+  if (res.headersSent) {
+    next(err);
+    return;
+  }
+  if (req.path?.startsWith("/api/")) {
+    res.status(500).json({ error: err?.message || "Внутренняя ошибка" });
+    return;
+  }
+  res.status(500).type("text").send(err?.message || "Internal error");
+});
+
 app.listen(PORT, () => {
+  logStartup({ port: PORT });
   const base = `http://localhost:${PORT}`;
   console.log(`AI Searcher: ${base}`);
   console.log(`  API:     POST ${base}/api/query  |  POST ${base}/api/query/stream (SSE)`);
