@@ -1,5 +1,6 @@
 import { extractLinks } from "./extractLinks.js";
 import { explainNetworkError } from "./networkError.js";
+import { logEvent } from "./logger.js";
 import { SEARCH_SYSTEM_PROMPT } from "./prompt.js";
 import {
   extractResponsesOutputText,
@@ -28,6 +29,16 @@ export const PROVIDER_LABELS = {
 
 const TIMEOUT_MS = 120_000;
 
+/**
+ * @param {unknown} err
+ * @param {number} status
+ */
+function attachHttpStatus(err, status) {
+  if (err instanceof Error && Number.isFinite(status)) {
+    Object.assign(err, { httpStatus: status });
+  }
+}
+
 export function getConfiguredProviders() {
   return {
     chatgpt: Boolean(process.env.OPENAI_API_KEY?.trim()),
@@ -49,18 +60,31 @@ export function getConfiguredProviders() {
  */
 
 /**
+ * @typedef {{ requestId?: string }} ProviderLogMeta
+ */
+
+/**
  * @param {string} id
  * @param {string} query
+ * @param {ProviderLogMeta} [logMeta]
  * @returns {Promise<{ id: string, label: string, text: string, links: string[], usage?: TokenUsage | null, error?: string, durationMs: number }>}
  */
-export async function runProvider(id, query) {
+export async function runProvider(id, query, logMeta = {}) {
   const label = PROVIDER_LABELS[id] ?? id;
   const t0 = Date.now();
+  logEvent("info", "provider:start", {
+    providerId: id,
+    label,
+    queryChars: typeof query === "string" ? query.length : 0,
+    ...logMeta,
+  });
   try {
     /** @type {string} */
     let text = "";
     /** @type {TokenUsage | null} */
     let usage = null;
+    /** @type {number | null} */
+    let httpStatus = null;
     switch (id) {
       case "chatgpt": {
         const out = await chatCompletionsViaFetch({
@@ -71,6 +95,7 @@ export async function runProvider(id, query) {
         });
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       case "deepseek": {
@@ -82,30 +107,35 @@ export async function runProvider(id, query) {
         });
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       case "perplexity": {
         const out = await perplexitySonar(query);
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       case "google": {
-        const out = await geminiChat(query);
+        const out = await geminiChat(query, logMeta);
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       case "alice": {
         const out = await yandexAlice(query);
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       case "alice_search": {
         const out = await yandexGenSearch(query);
         text = out.text;
         usage = out.usage;
+        httpStatus = out.httpStatus ?? null;
         break;
       }
       default:
@@ -113,9 +143,25 @@ export async function runProvider(id, query) {
     }
     const durationMs = Date.now() - t0;
     const links = extractLinks(text);
+    logEvent("info", "provider:ok", {
+      providerId: id,
+      label,
+      durationMs,
+      httpStatus,
+      responseChars: text.trim().length,
+      linksCount: links.length,
+      usageInput: usage?.input ?? null,
+      usageOutput: usage?.output ?? null,
+      usageTotal: usage?.total ?? null,
+      ...logMeta,
+    });
     return { id, label, text: text.trim(), links, usage, durationMs };
   } catch (e) {
     const durationMs = Date.now() - t0;
+    const httpStatus =
+      e && typeof e === "object" && "httpStatus" in e && Number.isFinite(/** @type {any} */ (e).httpStatus)
+        ? /** @type {any} */ (e).httpStatus
+        : null;
     let msg = explainNetworkError(e);
     if (id === "deepseek" && /402|Insufficient Balance|insufficient balance/i.test(msg)) {
       msg =
@@ -123,6 +169,16 @@ export async function runProvider(id, query) {
     } else {
       msg = enrichGeoAndAuthHints(id, msg);
     }
+    logEvent("warn", "provider:fail", {
+      providerId: id,
+      label,
+      durationMs,
+      httpStatus,
+      errorMessage: msg.slice(0, 2000),
+      errorName: e instanceof Error ? e.name : typeof e,
+      stack: e instanceof Error ? e.stack : undefined,
+      ...logMeta,
+    });
     return { id, label, text: "", links: [], usage: null, error: msg, durationMs };
   }
 }
@@ -151,7 +207,7 @@ function enrichGeoAndAuthHints(id, msg) {
  * Perplexity Sonar API: официальный путь `POST /v1/sonar` с полем `usage`.
  * Вызов через OpenAI SDK на `/v1/chat/completions` часто приходит без нормальной разбивки токенов.
  *
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function perplexitySonar(query) {
   const apiKey = process.env.PERPLEXITY_API_KEY?.trim();
@@ -182,13 +238,15 @@ async function perplexitySonar(query) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(perplexityErrorMessage(data) || res.statusText || "Perplexity API error");
+    const err = new Error(perplexityErrorMessage(data) || res.statusText || "Perplexity API error");
+    attachHttpStatus(err, res.status);
+    throw err;
   }
 
   const text = data.choices?.[0]?.message?.content ?? "";
   const usage = usageHarvestChatCompletions(data);
 
-  return { text, usage };
+  return { text, usage, httpStatus: res.status };
 }
 
 function perplexityErrorMessage(data) {
@@ -217,7 +275,7 @@ function openAiCompatibleErrorMessage(data) {
 /**
  * Сырой POST /chat/completions — в JSON всегда есть `usage` (при успехе), без обходных путей SDK.
  *
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function chatCompletionsViaFetch({ apiKey, baseURL, model, query }) {
   if (!apiKey) throw new Error("Не задан API-ключ");
@@ -245,14 +303,16 @@ async function chatCompletionsViaFetch({ apiKey, baseURL, model, query }) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(
+    const err = new Error(
       openAiCompatibleErrorMessage(data) || res.statusText || "Chat Completions API error"
     );
+    attachHttpStatus(err, res.status);
+    throw err;
   }
 
   const text = data.choices?.[0]?.message?.content ?? "";
   const usage = usageHarvestChatCompletions(data);
-  return { text, usage };
+  return { text, usage, httpStatus: res.status };
 }
 
 /**
@@ -269,9 +329,11 @@ const GEMINI_MODEL_FALLBACKS = [
 ];
 
 /**
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @param {string} query
+ * @param {ProviderLogMeta} [logMeta]
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function geminiChat(query) {
+async function geminiChat(query, logMeta = {}) {
   const apiKey = process.env.GOOGLE_AI_API_KEY?.trim();
   if (!apiKey) throw new Error("Не задан GOOGLE_AI_API_KEY");
 
@@ -285,11 +347,23 @@ async function geminiChat(query) {
       return await geminiGenerateOnce(apiKey, model, query);
     } catch (e) {
       lastMessage = e?.message || String(e);
+      const httpStatus =
+        e && typeof e === "object" && "httpStatus" in e && Number.isFinite(/** @type {any} */ (e).httpStatus)
+          ? /** @type {any} */ (e).httpStatus
+          : null;
       const tryNextModel =
         /not found|is not found|not supported for generateContent|404/i.test(lastMessage) ||
         /high demand|overloaded|rate limit|too many requests|resource.?exhausted|temporarily unavailable|try again later|capacity|quota|unavailable|503|429/i.test(
           lastMessage
         );
+      logEvent("warn", "provider:gemini:attempt_fail", {
+        model,
+        willRetry: tryNextModel && i < candidates.length - 1,
+        nextModel: tryNextModel ? candidates[i + 1] ?? null : null,
+        message: lastMessage.slice(0, 800),
+        httpStatus,
+        ...logMeta,
+      });
       if (!tryNextModel) throw e;
       const hasNext = i < candidates.length - 1;
       if (hasNext && /high demand|overloaded|try again later|429|503/i.test(lastMessage)) {
@@ -297,13 +371,14 @@ async function geminiChat(query) {
       }
     }
   }
-  throw new Error(
+  const finalErr = new Error(
     `${lastMessage} Переполнение/лимиты у выбранных моделей. Задайте GOOGLE_GEMINI_MODEL или повторите запрос позже. Список моделей: GET https://generativelanguage.googleapis.com/v1beta/models?key=...`
   );
+  throw finalErr;
 }
 
 /**
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function geminiGenerateOnce(apiKey, model, query) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
@@ -328,19 +403,26 @@ async function geminiGenerateOnce(apiKey, model, query) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     const errText = data?.error?.message || res.statusText || "Gemini API error";
-    throw new Error(errText);
+    const err = new Error(errText);
+    attachHttpStatus(err, res.status);
+    throw err;
   }
   const parts = data?.candidates?.[0]?.content?.parts;
-  if (!parts?.length) throw new Error("Пустой ответ Gemini");
+  if (!parts?.length) {
+    const err = new Error("Пустой ответ Gemini");
+    attachHttpStatus(err, res.status);
+    throw err;
+  }
   const usage = usageHarvestGemini(data);
   return {
     text: parts.map((p) => p.text || "").join(""),
     usage,
+    httpStatus: res.status,
   };
 }
 
 /**
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function yandexAlice(query) {
   const folderId = process.env.YANDEX_CLOUD_FOLDER_ID?.trim();
@@ -371,17 +453,23 @@ async function yandexAlice(query) {
 
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
-    throw new Error(
+    const err = new Error(
       openAiCompatibleErrorMessage(data) || res.statusText || "Yandex Responses API error"
     );
+    attachHttpStatus(err, res.status);
+    throw err;
   }
 
   const text = extractResponsesOutputText(data);
-  if (!text?.trim()) throw new Error("Пустой ответ Алисы");
+  if (!text?.trim()) {
+    const err = new Error("Пустой ответ Алисы");
+    attachHttpStatus(err, res.status);
+    throw err;
+  }
 
   const usage = usageHarvestResponses(data);
 
-  return { text, usage };
+  return { text, usage, httpStatus: res.status };
 }
 
 const DEFAULT_GEN_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/gen/search";
@@ -390,7 +478,7 @@ const DEFAULT_GEN_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/gen/se
  * Генеративный ответ по веб-поиску Яндекса (Yandex Cloud Search API, GenSearchService).
  * Это не HTML-выдача yandex.ru, а официальный API «поиск + модель» для разработчиков.
  *
- * @returns {Promise<{ text: string, usage: TokenUsage | null }>}
+ * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function yandexGenSearch(query) {
   const folderId =
@@ -432,14 +520,20 @@ async function yandexGenSearch(query) {
     } catch {
       if (rawText?.trim()) msg = rawText.trim().slice(0, 500);
     }
-    throw new Error(msg);
+    const err = new Error(msg);
+    attachHttpStatus(err, res.status);
+    throw err;
   }
 
   const chunks = parseGenSearchNdjsonOrJson(rawText);
   const text = formatGenSearchAnswer(chunks);
-  if (!text?.trim()) throw new Error("Пустой ответ генеративного поиска");
+  if (!text?.trim()) {
+    const err = new Error("Пустой ответ генеративного поиска");
+    attachHttpStatus(err, res.status);
+    throw err;
+  }
 
-  return { text, usage: null };
+  return { text, usage: null, httpStatus: res.status };
 }
 
 /**

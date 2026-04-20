@@ -1,4 +1,5 @@
 import "dotenv/config";
+import crypto from "node:crypto";
 import express from "express";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
@@ -35,6 +36,69 @@ const PORT = Number(process.env.PORT) || 3847;
 app.set("trust proxy", process.env.TRUST_PROXY !== "0");
 
 app.use(requestLoggerMiddleware);
+
+/**
+ * HTTP Basic для UI, статики, Swagger и openapi — не для `/api/*`, чтобы не мешать `Authorization: Bearer` у POST API.
+ * Задайте оба: SITE_BASIC_AUTH_USER и SITE_BASIC_AUTH_PASSWORD (в .env на проде).
+ */
+function siteBasicAuthMiddleware(req, res, next) {
+  const user = process.env.SITE_BASIC_AUTH_USER?.trim();
+  const passRaw = process.env.SITE_BASIC_AUTH_PASSWORD;
+  const pass = typeof passRaw === "string" ? passRaw : "";
+  if (!user || !pass) {
+    next();
+    return;
+  }
+  if (req.path.startsWith("/api/")) {
+    next();
+    return;
+  }
+
+  const auth = req.headers.authorization;
+  if (typeof auth !== "string" || !auth.startsWith("Basic ")) {
+    reject();
+    return;
+  }
+  let decoded = "";
+  try {
+    decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
+  } catch {
+    reject();
+    return;
+  }
+  const colon = decoded.indexOf(":");
+  const u = colon >= 0 ? decoded.slice(0, colon) : decoded;
+  const p = colon >= 0 ? decoded.slice(colon + 1) : "";
+  try {
+    const userBuf = Buffer.from(user, "utf8");
+    const uBuf = Buffer.from(u, "utf8");
+    const passBuf = Buffer.from(pass, "utf8");
+    const pBuf = Buffer.from(p, "utf8");
+    const uOk = uBuf.length === userBuf.length && crypto.timingSafeEqual(uBuf, userBuf);
+    const pOk = pBuf.length === passBuf.length && crypto.timingSafeEqual(pBuf, passBuf);
+    if (uOk && pOk) {
+      next();
+      return;
+    }
+  } catch {
+    reject();
+    return;
+  }
+  reject();
+
+  function reject() {
+    logEvent("warn", "site_basic_auth:rejected", {
+      ...getRequestLogContext(req),
+      path: req.path,
+      method: req.method,
+    });
+    res.status(401);
+    res.setHeader("WWW-Authenticate", 'Basic realm="AI Searcher"');
+    res.end("Unauthorized");
+  }
+}
+
+app.use(siteBasicAuthMiddleware);
 
 app.use(express.json({ limit: "1mb" }));
 
@@ -238,6 +302,7 @@ app.post(
     if (typeof res.flushHeaders === "function") res.flushHeaders();
 
     try {
+      const logMeta = { requestId: req.requestId };
       await streamSearchProgress(queries, selected, (ev) => {
         try {
           sseWrite(res, ev);
@@ -247,7 +312,7 @@ app.post(
             eventType: ev?.type,
           });
         }
-      });
+      }, logMeta);
       res.end();
       logEvent("info", "api:query_stream:done", {
         ...getRequestLogContext(req),
@@ -293,7 +358,9 @@ app.post(
           queryCount: queries.length,
           providers: selected,
         });
-        const out = await searchBatchAcrossProviders(queries, selected);
+        const out = await searchBatchAcrossProviders(queries, selected, {
+          requestId: req.requestId,
+        });
         res.json(out);
         logEvent("info", "api:query:batch:done", {
           ...getRequestLogContext(req),
@@ -318,7 +385,9 @@ app.post(
         providers: selected,
         queryChars: queries[0]?.length,
       });
-      const out = await searchAcrossProviders(queries[0], selected);
+      const out = await searchAcrossProviders(queries[0], selected, {
+        requestId: req.requestId,
+      });
       if (out.error) {
         logEvent("warn", "api:query:single:provider_error", {
           ...getRequestLogContext(req),

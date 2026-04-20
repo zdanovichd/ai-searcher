@@ -4,6 +4,7 @@ import {
   PROVIDER_LABELS,
   runProvider,
 } from "./providers.js";
+import { logEvent } from "./logger.js";
 
 /** Сколько пользовательских запросов в пакете обрабатывать параллельно (каждый всё ещё дергает все модели сразу). */
 const BATCH_QUERY_CONCURRENCY = Math.max(
@@ -121,8 +122,9 @@ function resultToStreamPayload(r) {
  * @param {string[]} queries
  * @param {string[]} selectedIds
  * @param {(ev: Record<string, unknown>) => void} emit — синхронно, не ждёт записи в сокет
+ * @param {{ requestId?: string }} [logMeta]
  */
-export async function streamSearchProgress(queries, selectedIds, emit) {
+export async function streamSearchProgress(queries, selectedIds, emit, logMeta = {}) {
   const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds);
 
   if (!requestedIds.length) {
@@ -151,6 +153,12 @@ export async function streamSearchProgress(queries, selectedIds, emit) {
   for (let qi = 0; qi < queries.length; qi++) {
     for (const id of requestedIds) {
       if (!configured[id]) {
+        logEvent("info", "provider:skip", {
+          providerId: id,
+          reason: "not_configured",
+          queryIndex: qi,
+          ...logMeta,
+        });
         emit({
           type: "result",
           queryIndex: qi,
@@ -165,7 +173,7 @@ export async function streamSearchProgress(queries, selectedIds, emit) {
   }
 
   await mapPool(tasks, STREAM_CELL_CONCURRENCY, async ({ qi, id, query }) => {
-    const r = await runProvider(id, query);
+    const r = await runProvider(id, query, { ...logMeta, queryIndex: qi });
     emit({
       type: "result",
       queryIndex: qi,
@@ -206,11 +214,12 @@ async function mapPool(array, poolSize, mapper) {
  *
  * @param {string[]} queries
  * @param {string[]} selectedIds
+ * @param {{ requestId?: string }} [logMeta]
  */
-export async function searchBatchAcrossProviders(queries, selectedIds) {
+export async function searchBatchAcrossProviders(queries, selectedIds, logMeta = {}) {
   const { skippedLabels } = resolveProviderIds(selectedIds);
   const items = await mapPool(queries, BATCH_QUERY_CONCURRENCY, async (query) => {
-    const out = await searchAcrossProviders(query, selectedIds);
+    const out = await searchAcrossProviders(query, selectedIds, logMeta);
     return {
       query,
       results: out.results,
@@ -223,8 +232,9 @@ export async function searchBatchAcrossProviders(queries, selectedIds) {
 /**
  * @param {string} query
  * @param {string[]} selectedIds — список id или ['all']
+ * @param {{ requestId?: string }} [logMeta]
  */
-export async function searchAcrossProviders(query, selectedIds) {
+export async function searchAcrossProviders(query, selectedIds, logMeta = {}) {
   const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds);
 
   if (!requestedIds.length) {
@@ -235,17 +245,35 @@ export async function searchAcrossProviders(query, selectedIds) {
     };
   }
 
+  const configured = getConfiguredProviders();
+
   if (!activeIds.length) {
     return {
-      results: requestedIds.map((id) => buildDisabledProviderResult(id)),
+      results: requestedIds.map((id) => {
+        logEvent("info", "provider:skip", {
+          providerId: id,
+          reason: "not_configured",
+          ...logMeta,
+        });
+        return buildDisabledProviderResult(id);
+      }),
       skippedLabels,
       error,
     };
   }
 
-  const activeResults = await Promise.all(activeIds.map((id) => runProvider(id, query)));
+  const activeResults = await Promise.all(activeIds.map((id) => runProvider(id, query, logMeta)));
   const byId = new Map(activeResults.map((r) => [r.id, r]));
-  const results = requestedIds.map((id) => byId.get(id) ?? buildDisabledProviderResult(id));
+  const results = requestedIds.map((id) => {
+    if (!configured[id]) {
+      logEvent("info", "provider:skip", {
+        providerId: id,
+        reason: "not_configured",
+        ...logMeta,
+      });
+    }
+    return byId.get(id) ?? buildDisabledProviderResult(id);
+  });
 
   return { results, skippedLabels, error: null };
 }
