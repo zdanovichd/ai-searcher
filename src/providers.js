@@ -2,7 +2,6 @@ import { extractLinks } from "./extractLinks.js";
 import { explainNetworkError } from "./networkError.js";
 import { logEvent } from "./logger.js";
 import { fetchForProvider, getOutboundProxyUrl } from "./proxyFetch.js";
-import { SEARCH_SYSTEM_PROMPT } from "./prompt.js";
 import {
   extractResponsesOutputText,
   usageHarvestChatCompletions,
@@ -230,10 +229,7 @@ async function perplexitySonar(query) {
     signal: AbortSignal.timeout(TIMEOUT_MS),
     body: JSON.stringify({
       model,
-      messages: [
-        { role: "system", content: SEARCH_SYSTEM_PROMPT },
-        { role: "user", content: query },
-      ],
+      messages: [{ role: "user", content: query }],
       temperature: 0.35,
       max_tokens: 2048,
       stream: false,
@@ -296,10 +292,7 @@ async function chatCompletionsViaFetch({ providerId, apiKey, baseURL, model, que
     signal: AbortSignal.timeout(TIMEOUT_MS),
     body: JSON.stringify({
       model,
-      messages: [
-        { role: "system", content: SEARCH_SYSTEM_PROMPT },
-        { role: "user", content: query },
-      ],
+      messages: [{ role: "user", content: query }],
       temperature: 0.35,
       max_tokens: 2048,
       stream: false,
@@ -394,9 +387,6 @@ async function geminiGenerateOnce(apiKey, model, query) {
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
     body: JSON.stringify({
-      systemInstruction: {
-        parts: [{ text: SEARCH_SYSTEM_PROMPT }],
-      },
       contents: [
         {
           role: "user",
@@ -450,7 +440,6 @@ async function yandexAlice(query) {
     signal: AbortSignal.timeout(TIMEOUT_MS),
     body: JSON.stringify({
       model: `gpt://${folderId}/${modelName}`,
-      instructions: SEARCH_SYSTEM_PROMPT,
       input: query,
       temperature: 0.35,
       max_output_tokens: 2048,

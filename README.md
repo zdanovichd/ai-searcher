@@ -208,8 +208,7 @@ curl -sS -X POST "http://localhost:3847/api/query" \
     ├── providers.js    # Вызовы API провайдеров
     ├── searchService.js
     ├── tokenUsage.js   # Нормализация usage из разных форматов ответов
-    ├── extractLinks.js # Парсинг URL из ответа
-    └── prompt.js       # Общий системный промпт
+    └── extractLinks.js # Парсинг URL из ответа
 ```
 
 ## Замечания по провайдерам
