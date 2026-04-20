@@ -26,7 +26,7 @@
       "post": {
         "tags": ["Query"],
         "summary": "Запрос к выбранным моделям",
-        "description": "Либо одно поле **`query`**, либо массив **`queries`** (пакет до 120 строк). Пустые строки в `queries` отбрасываются. Поле **`providers`**: `[\"all\"]` или список id: `chatgpt`, `deepseek`, `perplexity`, `google`, `alice`, `alice_search`.",
+        "description": "Либо одно поле **`query`**, либо массив **`queries`** (пакет до 120 строк). Пустые строки в `queries` отбрасываются. Поле **`providers`**: `[\"all\"]` или список id. Провайдеры **без ключа в .env** всё равно попадают в **`results`** с **`error`** и пустым **`text`**. **`skippedLabels`** — только подписи отключённых моделей из **текущего** списка `providers`.",
         "operationId": "postQuery",
         "requestBody": {
           "required": true,
@@ -245,7 +245,10 @@
             "items": { "type": "string", "format": "uri" }
           },
           "usage": { "$ref": "#/components/schemas/TokenUsage" },
-          "error": { "type": "string", "description": "Если модель вернула ошибку" },
+          "error": {
+            "type": "string",
+            "description": "Ошибка вызова модели или провайдер не настроен на сервере (нет ключа в .env) — тогда в `results` всё равно есть объект с `id`/`label` и пустым `text`."
+          },
           "durationMs": { "type": "integer" }
         }
       },
