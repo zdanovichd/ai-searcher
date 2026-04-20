@@ -35,8 +35,8 @@ const UI_PROVIDERS = [
   { id: "alice_search", label: "Алиса в Поиске (Yandex Search API)" },
 ];
 
-/** @type {{ id: string, label: string, configured: boolean }[]} */
-let providerMeta = UI_PROVIDERS.map((p) => ({ ...p, configured: true }));
+/** @type {{ id: string, label: string, configured: boolean, proxy?: boolean }[]} */
+let providerMeta = UI_PROVIDERS.map((p) => ({ ...p, configured: true, proxy: false }));
 
 /**
  * @type {{
@@ -189,6 +189,8 @@ function renderProviderChips() {
     if (!p.configured) {
       label.classList.add("chip-unavailable");
       label.title = "Не настроено на сервере (нет ключа в .env)";
+    } else if (p.proxy) {
+      label.title = "Исходящие запросы к API идут через HTTP(S)-прокси из .env";
     }
     const input = document.createElement("input");
     input.type = "checkbox";
@@ -215,6 +217,7 @@ async function refreshProviderMeta() {
         id: String(x.id),
         label: String(x.label ?? x.id),
         configured: Boolean(x.configured),
+        proxy: Boolean(x.proxy),
       }));
     }
   } catch {

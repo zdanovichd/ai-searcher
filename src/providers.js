@@ -1,6 +1,7 @@
 import { extractLinks } from "./extractLinks.js";
 import { explainNetworkError } from "./networkError.js";
 import { logEvent } from "./logger.js";
+import { fetchForProvider, getOutboundProxyUrl } from "./proxyFetch.js";
 import { SEARCH_SYSTEM_PROMPT } from "./prompt.js";
 import {
   extractResponsesOutputText,
@@ -76,6 +77,7 @@ export async function runProvider(id, query, logMeta = {}) {
     providerId: id,
     label,
     queryChars: typeof query === "string" ? query.length : 0,
+    outboundProxy: Boolean(getOutboundProxyUrl(id)),
     ...logMeta,
   });
   try {
@@ -88,6 +90,7 @@ export async function runProvider(id, query, logMeta = {}) {
     switch (id) {
       case "chatgpt": {
         const out = await chatCompletionsViaFetch({
+          providerId: "chatgpt",
           apiKey: process.env.OPENAI_API_KEY,
           baseURL: process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1",
           model: process.env.OPENAI_MODEL || "gpt-4o-mini",
@@ -100,6 +103,7 @@ export async function runProvider(id, query, logMeta = {}) {
       }
       case "deepseek": {
         const out = await chatCompletionsViaFetch({
+          providerId: "deepseek",
           apiKey: process.env.DEEPSEEK_API_KEY,
           baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
           model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
@@ -217,7 +221,7 @@ async function perplexitySonar(query) {
   const url =
     process.env.PERPLEXITY_API_URL?.trim() || "https://api.perplexity.ai/v1/sonar";
 
-  const res = await fetch(url, {
+  const res = await fetchForProvider("perplexity", url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -275,14 +279,15 @@ function openAiCompatibleErrorMessage(data) {
 /**
  * Сырой POST /chat/completions — в JSON всегда есть `usage` (при успехе), без обходных путей SDK.
  *
+ * @param {{ providerId: string, apiKey: string | undefined, baseURL: string, model: string, query: string }} opts
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function chatCompletionsViaFetch({ apiKey, baseURL, model, query }) {
+async function chatCompletionsViaFetch({ providerId, apiKey, baseURL, model, query }) {
   if (!apiKey) throw new Error("Не задан API-ключ");
   const root = (baseURL || "").replace(/\/$/, "");
   const url = `${root}/chat/completions`;
 
-  const res = await fetch(url, {
+  const res = await fetchForProvider(providerId, url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -383,7 +388,7 @@ async function geminiChat(query, logMeta = {}) {
 async function geminiGenerateOnce(apiKey, model, query) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-  const res = await fetch(url, {
+  const res = await fetchForProvider("google", url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     signal: AbortSignal.timeout(TIMEOUT_MS),
@@ -434,7 +439,7 @@ async function yandexAlice(query) {
     process.env.YANDEX_RESPONSES_URL?.trim() ||
     "https://ai.api.cloud.yandex.net/v1/responses";
 
-  const res = await fetch(url, {
+  const res = await fetchForProvider("alice", url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -495,7 +500,7 @@ async function yandexGenSearch(query) {
   const searchType =
     process.env.YANDEX_GEN_SEARCH_SEARCH_TYPE?.trim() || "SEARCH_TYPE_RU";
 
-  const res = await fetch(url, {
+  const res = await fetchForProvider("alice_search", url, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

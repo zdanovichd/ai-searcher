@@ -26,7 +26,7 @@
       "get": {
         "tags": ["Query"],
         "summary": "Список моделей и настройка в .env",
-        "description": "Публично, **без** заголовка `API_SECRET`. Для UI: какие провайдеры доступны по ключам на сервере.",
+        "description": "Публично, **без** заголовка `API_SECRET`. Для UI: какие провайдеры доступны по ключам на сервере; поле **`proxy`** — задан ли для провайдера исходящий HTTP(S)-прокси (без URL).",
         "operationId": "getMeta",
         "responses": {
           "200": {
@@ -236,13 +236,17 @@
     "schemas": {
       "MetaProviderEntry": {
         "type": "object",
-        "required": ["id", "label", "configured"],
+        "required": ["id", "label", "configured", "proxy"],
         "properties": {
           "id": { "type": "string", "description": "Id провайдера" },
           "label": { "type": "string", "description": "Подпись для UI" },
           "configured": {
             "type": "boolean",
             "description": "true, если на сервере заданы нужные переменные .env для этого провайдера"
+          },
+          "proxy": {
+            "type": "boolean",
+            "description": "true, если для этого провайдера задан URL исходящего HTTP(S)-прокси в .env (без раскрытия URL)"
           }
         }
       },

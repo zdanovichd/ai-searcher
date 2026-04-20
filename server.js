@@ -10,6 +10,7 @@ import {
   PROVIDER_LABELS,
   getConfiguredProviders,
 } from "./src/providers.js";
+import { getOutboundProxyUrl } from "./src/proxyFetch.js";
 import {
   MAX_BATCH_QUERIES,
   searchAcrossProviders,
@@ -232,6 +233,7 @@ app.get("/api/meta", (req, res, next) => {
       id,
       label: PROVIDER_LABELS[id] ?? id,
       configured: Boolean(configured[id]),
+      proxy: Boolean(getOutboundProxyUrl(id)),
     }));
     res.json({ providers });
   } catch (e) {
