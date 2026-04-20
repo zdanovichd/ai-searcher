@@ -322,15 +322,13 @@ async function chatCompletionsViaFetch({ providerId, apiKey, baseURL, model, que
 
 /**
  * Порядок, если GOOGLE_GEMINI_MODEL не задан или модель недоступна.
- * Сверено с актуальным ListModels (generateContent): 2.5 Flash stable, 2.0, «latest», lite.
+ * Без gemini-2.0-flash*: для новых ключей Google часто отдаёт «no longer available to new users».
  */
 const GEMINI_MODEL_FALLBACKS = [
   "gemini-2.5-flash",
-  "gemini-2.0-flash",
-  "gemini-2.0-flash-001",
-  "gemini-flash-latest",
   "gemini-2.5-flash-lite",
-  "gemini-2.0-flash-lite",
+  "gemini-flash-latest",
+  "gemini-2.5-pro",
 ];
 
 /**
@@ -358,6 +356,9 @@ async function geminiChat(query, logMeta = {}) {
           : null;
       const tryNextModel =
         /not found|is not found|not supported for generateContent|404/i.test(lastMessage) ||
+        /no longer available|not available to new users|deprecated|discontinued|PERMISSION_DENIED/i.test(
+          lastMessage
+        ) ||
         /high demand|overloaded|rate limit|too many requests|resource.?exhausted|temporarily unavailable|try again later|capacity|quota|unavailable|503|429/i.test(
           lastMessage
         );
