@@ -30,6 +30,13 @@ export function getPool() {
 
 export async function initDatabase() {
   const p = getPool();
+  const { rows } = await p.query(
+    "SELECT 1 AS ok FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'users' LIMIT 1"
+  );
+  if (rows.length > 0) {
+    logEvent("info", "db:schema_ready", { skipped: true });
+    return;
+  }
   const schemaPath = path.join(__dirname, "..", "schema", "init.sql");
   const sql = fs.readFileSync(schemaPath, "utf8");
   await p.query(sql);
