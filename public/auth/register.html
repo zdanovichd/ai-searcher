@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Регистрация — AI Searcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/shared/cabinet.css?v=4" />
+  </head>
+  <body class="app-page app-page--auth">
+    <div class="noise" aria-hidden="true"></div>
+    <main class="app-shell">
+      <div class="app-brand">
+        <p class="app-brand-title">AI Searcher</p>
+        <p class="app-brand-subtitle">Создайте аккаунт для доступа к сервису</p>
+      </div>
+      <section class="app-card">
+        <h2>Регистрация</h2>
+        <p class="app-lead">После регистрации можно сразу войти в личный кабинет.</p>
+        <form id="form" class="stack auth-form">
+          <div>
+            <label for="email">Email</label>
+            <input id="email" type="email" autocomplete="username" required />
+          </div>
+          <div>
+            <label for="password">Пароль</label>
+            <input id="password" type="password" autocomplete="new-password" required />
+          </div>
+          <button type="submit" class="btn">Создать аккаунт</button>
+        </form>
+        <p id="status" class="status"></p>
+        <p class="muted"><a href="/login">Уже есть аккаунт</a> · <a href="/legal/">Сведения для покупателей</a></p>
+      </section>
+    </main>
+    <script type="module">
+      document.getElementById("form").addEventListener("submit", async (e) => {
+        e.preventDefault();
+        const status = document.getElementById("status");
+        status.classList.remove("error", "ok");
+        const res = await fetch("/api/auth/register", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            email: document.getElementById("email").value,
+            password: document.getElementById("password").value,
+          }),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          status.textContent = data.error || "Не удалось зарегистрироваться.";
+          status.classList.add("error");
+          return;
+        }
+        status.textContent = data.message || "Проверьте почту и подтвердите email.";
+        status.classList.add("ok");
+      });
+    </script>
+  </body>
+</html>

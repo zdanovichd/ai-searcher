@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Администрирование — AI Searcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/shared/cabinet.css?v=4" />
+  </head>
+  <body class="app-page">
+    <div class="noise" aria-hidden="true"></div>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="app-brand">
+          <p class="app-brand-title"><a href="/admin/">Администрирование</a></p>
+          <p class="app-brand-subtitle">Пользователи, баланс и статистика сервиса</p>
+        </div>
+        <nav class="app-nav" aria-label="Основная навигация">
+          <a href="/cabinet/">Кабинет</a>
+          <a href="/cabinet/search">Поиск</a>
+          <a href="/admin/" class="is-active">Администрирование</a>
+          <button type="button" id="logout" class="btn-secondary">Выйти</button>
+        </nav>
+      </header>
+
+      <section class="app-section app-card">
+        <h2>Сводка</h2>
+        <div id="stats" class="app-grid app-grid-3">Загрузка…</div>
+      </section>
+
+      <section class="app-section app-card">
+        <h2>Пользователи</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Email</th>
+                <th>Роль</th>
+                <th>Статус</th>
+                <th>Подтверждение</th>
+                <th>Баланс</th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="users"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="app-section app-card">
+        <h2>История запросов</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>ID пользователя</th>
+                <th>Запрос</th>
+                <th>Количество</th>
+              </tr>
+            </thead>
+            <tbody id="history"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/admin/app.js?v=5"></script>
+  </body>
+</html>

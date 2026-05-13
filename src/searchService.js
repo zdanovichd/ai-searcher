@@ -70,8 +70,8 @@ function buildDisabledProviderResult(id) {
  * - `requestedIds` — полный запрошенный список (включая без ключей), порядок сохранён.
  * - `skippedLabels` — подписи провайдеров из запроса, у которых нет ключа.
  */
-export function resolveProviderIds(selectedIds) {
-  const configured = getConfiguredProviders();
+export function resolveProviderIds(selectedIds, userSecrets = null) {
+  const configured = getConfiguredProviders(userSecrets);
   const requestedIds = getRequestedProviderIds(selectedIds);
 
   if (!requestedIds.length) {
@@ -124,15 +124,15 @@ function resultToStreamPayload(r) {
  * @param {(ev: Record<string, unknown>) => void} emit — синхронно, не ждёт записи в сокет
  * @param {{ requestId?: string }} [logMeta]
  */
-export async function streamSearchProgress(queries, selectedIds, emit, logMeta = {}) {
-  const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds);
+export async function streamSearchProgress(queries, selectedIds, emit, logMeta = {}, userSecrets = null) {
+  const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds, userSecrets);
 
   if (!requestedIds.length) {
     emit({ type: "error", message: error || "Нет провайдеров.", skippedLabels });
     return;
   }
 
-  const configured = getConfiguredProviders();
+  const configured = getConfiguredProviders(userSecrets);
   const totalCells = queries.length * requestedIds.length;
   let completed = 0;
 
@@ -173,7 +173,7 @@ export async function streamSearchProgress(queries, selectedIds, emit, logMeta =
   }
 
   await mapPool(tasks, STREAM_CELL_CONCURRENCY, async ({ qi, id, query }) => {
-    const r = await runProvider(id, query, { ...logMeta, queryIndex: qi });
+    const r = await runProvider(id, query, { ...logMeta, queryIndex: qi }, userSecrets);
     emit({
       type: "result",
       queryIndex: qi,
@@ -216,10 +216,10 @@ async function mapPool(array, poolSize, mapper) {
  * @param {string[]} selectedIds
  * @param {{ requestId?: string }} [logMeta]
  */
-export async function searchBatchAcrossProviders(queries, selectedIds, logMeta = {}) {
-  const { skippedLabels } = resolveProviderIds(selectedIds);
+export async function searchBatchAcrossProviders(queries, selectedIds, logMeta = {}, userSecrets = null) {
+  const { skippedLabels } = resolveProviderIds(selectedIds, userSecrets);
   const items = await mapPool(queries, BATCH_QUERY_CONCURRENCY, async (query) => {
-    const out = await searchAcrossProviders(query, selectedIds, logMeta);
+    const out = await searchAcrossProviders(query, selectedIds, logMeta, userSecrets);
     return {
       query,
       results: out.results,
@@ -234,8 +234,8 @@ export async function searchBatchAcrossProviders(queries, selectedIds, logMeta =
  * @param {string[]} selectedIds — список id или ['all']
  * @param {{ requestId?: string }} [logMeta]
  */
-export async function searchAcrossProviders(query, selectedIds, logMeta = {}) {
-  const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds);
+export async function searchAcrossProviders(query, selectedIds, logMeta = {}, userSecrets = null) {
+  const { ids: activeIds, requestedIds, skippedLabels, error } = resolveProviderIds(selectedIds, userSecrets);
 
   if (!requestedIds.length) {
     return {
@@ -245,7 +245,7 @@ export async function searchAcrossProviders(query, selectedIds, logMeta = {}) {
     };
   }
 
-  const configured = getConfiguredProviders();
+  const configured = getConfiguredProviders(userSecrets);
 
   if (!activeIds.length) {
     return {
@@ -262,7 +262,9 @@ export async function searchAcrossProviders(query, selectedIds, logMeta = {}) {
     };
   }
 
-  const activeResults = await Promise.all(activeIds.map((id) => runProvider(id, query, logMeta)));
+  const activeResults = await Promise.all(
+    activeIds.map((id) => runProvider(id, query, logMeta, userSecrets))
+  );
   const byId = new Map(activeResults.map((r) => [r.id, r]));
   const results = requestedIds.map((id) => {
     if (!configured[id]) {

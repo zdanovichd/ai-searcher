@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Личный кабинет — AI Searcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/shared/cabinet.css?v=7" />
+  </head>
+  <body class="app-page">
+    <div class="noise" aria-hidden="true"></div>
+    <main class="app-shell">
+      <header class="app-header">
+        <div class="app-brand">
+          <p class="app-brand-title"><a href="/cabinet/">Личный кабинет</a></p>
+          <p class="app-brand-subtitle">Настройки аккаунта, ключи и история запросов</p>
+        </div>
+        <nav class="app-nav" aria-label="Основная навигация">
+          <a href="/cabinet/" class="is-active">Кабинет</a>
+          <a href="/cabinet/search">Поиск</a>
+          <a href="/admin/" id="admin-link" class="hidden">Администрирование</a>
+          <button type="button" id="logout" class="btn-secondary">Выйти</button>
+        </nav>
+      </header>
+
+      <section class="app-section app-grid app-grid-2">
+        <article class="app-card">
+          <h2>Профиль</h2>
+          <p id="profile" class="muted">Загрузка данных…</p>
+          <form id="password-form" class="stack" style="margin-top: 1rem">
+            <div>
+              <label for="currentPassword">Текущий пароль</label>
+              <input id="currentPassword" type="password" autocomplete="current-password" />
+            </div>
+            <div>
+              <label for="newPassword">Новый пароль</label>
+              <input id="newPassword" type="password" autocomplete="new-password" />
+            </div>
+            <button type="submit" class="btn-secondary">Сменить пароль</button>
+          </form>
+          <p id="password-status" class="status"></p>
+        </article>
+
+        <article class="app-card">
+          <h2>Баланс и лимиты</h2>
+          <p id="balance" class="metric-value">—</p>
+          <p id="limits" class="metric-label">—</p>
+          <div class="btn-row" style="margin-top: 0.75rem">
+            <button type="button" id="btn-topup-robokassa" class="btn">Пополнить 100 ₽ (100 токенов)</button>
+          </div>
+          <p id="topup-status" class="status" style="margin-top: 0.75rem"></p>
+        </article>
+      </section>
+
+      <section class="app-section app-card">
+        <h2>API-ключи</h2>
+        <p class="app-lead">Для внешних интеграций используйте заголовок <code>X-API-Key</code> или <code>Authorization: Bearer</code>.</p>
+        <form id="api-key-form" class="stack" style="max-width: 420px">
+          <div>
+            <label for="apiKeyName">Название ключа</label>
+            <input id="apiKeyName" type="text" placeholder="Например: Postman или скрипт импорта" />
+          </div>
+          <button type="submit" class="btn">Создать ключ</button>
+        </form>
+        <p id="api-key-created" class="status"></p>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>Префикс</th>
+                <th>Создан</th>
+                <th>Действие</th>
+              </tr>
+            </thead>
+            <tbody id="api-keys"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="app-section app-card">
+        <h2>История запросов</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Дата</th>
+                <th>Запрос</th>
+                <th>Ответы</th>
+                <th>Пакет</th>
+                <th>Количество</th>
+              </tr>
+            </thead>
+            <tbody id="history"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/cabinet/app.js?v=3"></script>
+  </body>
+</html>

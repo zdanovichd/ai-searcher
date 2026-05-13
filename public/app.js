@@ -1,3 +1,21 @@
+const API_CONFIG = window.AI_SEARCHER_API || {
+  metaUrl: "/api/meta",
+  streamUrl: "/api/query/stream",
+  useBearer: false,
+};
+
+function apiHeaders(extra = {}) {
+  const headers = { ...extra };
+  if (API_CONFIG.useBearer) {
+    const token = localStorage.getItem("ais_access_token");
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+  if (API_CONFIG.apiKey) {
+    headers["X-API-Key"] = API_CONFIG.apiKey;
+  }
+  return headers;
+}
+
 const q = document.getElementById("q");
 const runBtn = document.getElementById("run");
 const exportBtn = document.getElementById("export-xlsx");
@@ -209,7 +227,7 @@ function renderProviderChips() {
 
 async function refreshProviderMeta() {
   try {
-    const r = await fetch("/api/meta");
+    const r = await fetch(API_CONFIG.metaUrl, { headers: apiHeaders() });
     if (!r.ok) throw new Error("meta");
     const data = await r.json();
     if (Array.isArray(data.providers) && data.providers.length) {
@@ -739,9 +757,9 @@ runBtn.addEventListener("click", async () => {
   setStatus(`Поток: ${list.length} запрос(ов)…`);
 
   try {
-    const res = await fetch("/api/query/stream", {
+    const res = await fetch(API_CONFIG.streamUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: apiHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ queries: list, providers: selectedProviders() }),
     });
 

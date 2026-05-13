@@ -165,6 +165,8 @@ export function logStartup(meta = {}) {
 /** Регистрация логов на сбои процесса (один раз при старте приложения). */
 export function registerGlobalErrorHandlers() {
   process.on("uncaughtException", (err) => {
+    // Важно вывести в консоль: при process.exit(1) асинхронная запись логов может не успеть.
+    console.error("[uncaughtException]", err);
     logError(err, null, { source: "uncaughtException" });
     process.exit(1);
   });

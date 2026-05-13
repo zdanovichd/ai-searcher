@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <title>Поиск — AI Searcher</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css?v=14" />
+    <link rel="stylesheet" href="/shared/cabinet.css?v=4" />
+  </head>
+  <body class="app-page app-page--search">
+    <div class="noise" aria-hidden="true"></div>
+    <div class="app-shell app-shell--search-intro">
+      <header class="app-header">
+        <div class="app-brand">
+          <p class="app-brand-title"><a href="/cabinet/search">Поиск по моделям</a></p>
+          <p class="app-brand-subtitle">Сравнение ответов и ссылки из текста</p>
+        </div>
+        <nav class="app-nav" aria-label="Основная навигация">
+          <a href="/cabinet/">Кабинет</a>
+          <a href="/cabinet/search" class="is-active">Поиск</a>
+          <a href="/admin/" id="admin-link" class="hidden">Администрирование</a>
+          <button type="button" id="logout" class="btn-secondary">Выйти</button>
+        </nav>
+      </header>
+    </div>
+    <header class="top">
+      <p class="lead">
+        Введите запросы списком: каждая строка — отдельный запрос (до 120). Таблица заполняется по мере
+        готовности ответов. Результаты можно выгрузить в Excel. Документация API:
+        <a href="/api-docs/">Swagger</a> · <a href="/openapi.json">OpenAPI</a>.
+      </p>
+    </header>
+
+    <main class="layout">
+      <section class="panel query-panel">
+        <label for="q">Запрос</label>
+        <textarea
+          id="q"
+          rows="8"
+          placeholder="Одна строка — один запрос (до 120). Пример:&#10;запрос A&#10;запрос B"
+        ></textarea>
+        <p class="field-hint">
+          До 120 строк; пустые строки игнорируются. Один запрос — одна строка (перенос внутри фразы даёт два запроса).
+          Модели без настроенного ключа будут пропущены.
+        </p>
+
+        <fieldset class="providers">
+          <legend>Модели</legend>
+          <label class="chip chip-all">
+            <input type="checkbox" name="all" value="all" checked />
+            <span>Все настроенные</span>
+          </label>
+          <div id="provider-list" class="provider-list"></div>
+        </fieldset>
+
+        <div class="actions">
+          <button type="button" id="run" class="btn">Спросить</button>
+          <button type="button" id="export-xlsx" class="btn btn-secondary" disabled>
+            Скачать Excel
+          </button>
+        </div>
+        <p id="status" class="status" role="status"></p>
+      </section>
+
+      <section id="results" class="results" aria-live="polite">
+        <div id="stream-progress" class="stream-progress is-hidden" aria-hidden="true">
+          <div class="stream-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+            <div id="stream-progress-fill" class="stream-progress-fill"></div>
+          </div>
+          <span id="stream-progress-pct" class="stream-progress-pct">0%</span>
+        </div>
+        <div id="results-table-host"></div>
+      </section>
+    </main>
+
+    <button
+      type="button"
+      id="scroll-top-btn"
+      class="scroll-top-btn is-hidden"
+      aria-label="Наверх"
+      title="Наверх"
+    >
+      <svg width="22" height="22" viewBox="0 0 24 24" aria-hidden="true">
+        <path fill="currentColor" d="M7.41 15.41L12 10.83l4.59 4.58L18 14l-6-6-6 6z" />
+      </svg>
+    </button>
+
+    <div id="stream-progress-dock" class="stream-progress-dock is-hidden" aria-hidden="true">
+      <div class="stream-progress-dock-inner">
+        <span class="stream-progress-dock-label">Прогресс</span>
+        <div
+          class="stream-progress-track stream-progress-track--dock"
+          role="progressbar"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          aria-valuenow="0"
+        >
+          <div id="stream-progress-dock-fill" class="stream-progress-fill"></div>
+        </div>
+        <span id="stream-progress-dock-pct" class="stream-progress-pct">0%</span>
+      </div>
+    </div>
+
+    <script>
+      window.AI_SEARCHER_API = {
+        metaUrl: "/api/cabinet/meta",
+        streamUrl: "/api/cabinet/query/stream",
+        useBearer: true,
+      };
+    </script>
+    <script type="module">
+      import { authFetch, requireAuthPage, logout } from "/shared/session.js";
+      await requireAuthPage();
+      document.getElementById("logout")?.addEventListener("click", () => logout());
+      const me = await authFetch("/api/cabinet/me");
+      const data = await me.json();
+      if (data.user?.role === "admin") {
+        document.getElementById("admin-link")?.classList.remove("hidden");
+      }
+    </script>
+    <script src="/app.js?v=17" type="module"></script>
+  </body>
+</html>

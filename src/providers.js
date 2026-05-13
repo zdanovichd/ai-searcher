@@ -39,8 +39,8 @@ function attachHttpStatus(err, status) {
   }
 }
 
-export function getConfiguredProviders() {
-  return {
+export function getConfiguredProviders(userSecrets = null) {
+  const base = {
     chatgpt: Boolean(process.env.OPENAI_API_KEY?.trim()),
     deepseek: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
     perplexity: Boolean(process.env.PERPLEXITY_API_KEY?.trim()),
@@ -53,6 +53,41 @@ export function getConfiguredProviders() {
         (process.env.YANDEX_GEN_SEARCH_FOLDER_ID?.trim() || process.env.YANDEX_CLOUD_FOLDER_ID?.trim())
     ),
   };
+  if (!userSecrets) return base;
+  return {
+    chatgpt: base.chatgpt || Boolean(userSecrets.chatgpt?.OPENAI_API_KEY?.trim()),
+    deepseek: base.deepseek || Boolean(userSecrets.deepseek?.DEEPSEEK_API_KEY?.trim()),
+    perplexity: base.perplexity || Boolean(userSecrets.perplexity?.PERPLEXITY_API_KEY?.trim()),
+    google: base.google || Boolean(userSecrets.google?.GOOGLE_AI_API_KEY?.trim()),
+    alice:
+      base.alice ||
+      Boolean(
+        userSecrets.alice?.YANDEX_CLOUD_API_KEY?.trim() &&
+          userSecrets.alice?.YANDEX_CLOUD_FOLDER_ID?.trim()
+      ),
+    alice_search:
+      base.alice_search ||
+      Boolean(
+        (userSecrets.alice_search?.YANDEX_GEN_SEARCH_API_KEY?.trim() ||
+          userSecrets.alice_search?.YANDEX_CLOUD_API_KEY?.trim()) &&
+          (userSecrets.alice_search?.YANDEX_GEN_SEARCH_FOLDER_ID?.trim() ||
+            userSecrets.alice_search?.YANDEX_CLOUD_FOLDER_ID?.trim())
+      ),
+  };
+}
+
+/**
+ * @param {string} providerId
+ * @param {string} field
+ * @param {Record<string, Record<string, string>> | null | undefined} userSecrets
+ * @param {string} [fallback]
+ */
+function pickProviderField(providerId, field, userSecrets, fallback = "") {
+  const fromUser = userSecrets?.[providerId]?.[field];
+  if (typeof fromUser === "string" && fromUser.trim()) return fromUser.trim();
+  const fromEnv = process.env[field];
+  if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim();
+  return fallback;
 }
 
 /**
@@ -67,9 +102,10 @@ export function getConfiguredProviders() {
  * @param {string} id
  * @param {string} query
  * @param {ProviderLogMeta} [logMeta]
+ * @param {Record<string, Record<string, string>> | null} [userSecrets]
  * @returns {Promise<{ id: string, label: string, text: string, links: string[], usage?: TokenUsage | null, error?: string, durationMs: number }>}
  */
-export async function runProvider(id, query, logMeta = {}) {
+export async function runProvider(id, query, logMeta = {}, userSecrets = null) {
   const label = PROVIDER_LABELS[id] ?? id;
   const t0 = Date.now();
   logEvent("info", "provider:start", {
@@ -90,9 +126,9 @@ export async function runProvider(id, query, logMeta = {}) {
       case "chatgpt": {
         const out = await chatCompletionsViaFetch({
           providerId: "chatgpt",
-          apiKey: process.env.OPENAI_API_KEY,
-          baseURL: process.env.OPENAI_BASE_URL?.trim() || "https://api.openai.com/v1",
-          model: process.env.OPENAI_MODEL || "gpt-4o-mini",
+          apiKey: pickProviderField("chatgpt", "OPENAI_API_KEY", userSecrets),
+          baseURL: pickProviderField("chatgpt", "OPENAI_BASE_URL", userSecrets, "https://api.openai.com/v1"),
+          model: pickProviderField("chatgpt", "OPENAI_MODEL", userSecrets, "gpt-4o-mini"),
           query,
         });
         text = out.text;
@@ -103,9 +139,9 @@ export async function runProvider(id, query, logMeta = {}) {
       case "deepseek": {
         const out = await chatCompletionsViaFetch({
           providerId: "deepseek",
-          apiKey: process.env.DEEPSEEK_API_KEY,
-          baseURL: process.env.DEEPSEEK_BASE_URL?.trim() || "https://api.deepseek.com",
-          model: process.env.DEEPSEEK_MODEL || "deepseek-chat",
+          apiKey: pickProviderField("deepseek", "DEEPSEEK_API_KEY", userSecrets),
+          baseURL: pickProviderField("deepseek", "DEEPSEEK_BASE_URL", userSecrets, "https://api.deepseek.com"),
+          model: pickProviderField("deepseek", "DEEPSEEK_MODEL", userSecrets, "deepseek-chat"),
           query,
         });
         text = out.text;
@@ -114,28 +150,28 @@ export async function runProvider(id, query, logMeta = {}) {
         break;
       }
       case "perplexity": {
-        const out = await perplexitySonar(query);
+        const out = await perplexitySonar(query, userSecrets);
         text = out.text;
         usage = out.usage;
         httpStatus = out.httpStatus ?? null;
         break;
       }
       case "google": {
-        const out = await geminiChat(query, logMeta);
+        const out = await geminiChat(query, logMeta, userSecrets);
         text = out.text;
         usage = out.usage;
         httpStatus = out.httpStatus ?? null;
         break;
       }
       case "alice": {
-        const out = await yandexAlice(query);
+        const out = await yandexAlice(query, userSecrets);
         text = out.text;
         usage = out.usage;
         httpStatus = out.httpStatus ?? null;
         break;
       }
       case "alice_search": {
-        const out = await yandexGenSearch(query);
+        const out = await yandexGenSearch(query, userSecrets);
         text = out.text;
         usage = out.usage;
         httpStatus = out.httpStatus ?? null;
@@ -212,13 +248,17 @@ function enrichGeoAndAuthHints(id, msg) {
  *
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function perplexitySonar(query) {
-  const apiKey = process.env.PERPLEXITY_API_KEY?.trim();
+async function perplexitySonar(query, userSecrets = null) {
+  const apiKey = pickProviderField("perplexity", "PERPLEXITY_API_KEY", userSecrets);
   if (!apiKey) throw new Error("Не задан PERPLEXITY_API_KEY");
 
-  const model = process.env.PERPLEXITY_MODEL?.trim() || "sonar";
-  const url =
-    process.env.PERPLEXITY_API_URL?.trim() || "https://api.perplexity.ai/v1/sonar";
+  const model = pickProviderField("perplexity", "PERPLEXITY_MODEL", userSecrets, "sonar");
+  const url = pickProviderField(
+    "perplexity",
+    "PERPLEXITY_API_URL",
+    userSecrets,
+    "https://api.perplexity.ai/v1/sonar"
+  );
 
   const res = await fetchForProvider("perplexity", url, {
     method: "POST",
@@ -329,11 +369,11 @@ const GEMINI_MODEL_FALLBACKS = [
  * @param {ProviderLogMeta} [logMeta]
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function geminiChat(query, logMeta = {}) {
-  const apiKey = process.env.GOOGLE_AI_API_KEY?.trim();
+async function geminiChat(query, logMeta = {}, userSecrets = null) {
+  const apiKey = pickProviderField("google", "GOOGLE_AI_API_KEY", userSecrets);
   if (!apiKey) throw new Error("Не задан GOOGLE_AI_API_KEY");
 
-  const requested = process.env.GOOGLE_GEMINI_MODEL?.trim();
+  const requested = pickProviderField("google", "GOOGLE_GEMINI_MODEL", userSecrets, "");
   const candidates = [...new Set([...(requested ? [requested] : []), ...GEMINI_MODEL_FALLBACKS])];
 
   let lastMessage = "";
@@ -420,15 +460,18 @@ async function geminiGenerateOnce(apiKey, model, query) {
 /**
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function yandexAlice(query) {
-  const folderId = process.env.YANDEX_CLOUD_FOLDER_ID?.trim();
-  const apiKey = process.env.YANDEX_CLOUD_API_KEY?.trim();
+async function yandexAlice(query, userSecrets = null) {
+  const folderId = pickProviderField("alice", "YANDEX_CLOUD_FOLDER_ID", userSecrets);
+  const apiKey = pickProviderField("alice", "YANDEX_CLOUD_API_KEY", userSecrets);
   if (!folderId || !apiKey) throw new Error("Задайте YANDEX_CLOUD_FOLDER_ID и YANDEX_CLOUD_API_KEY");
 
-  const modelName = process.env.YANDEX_CLOUD_MODEL?.trim() || "aliceai-llm/latest";
-  const url =
-    process.env.YANDEX_RESPONSES_URL?.trim() ||
-    "https://ai.api.cloud.yandex.net/v1/responses";
+  const modelName = pickProviderField("alice", "YANDEX_CLOUD_MODEL", userSecrets, "aliceai-llm/latest");
+  const url = pickProviderField(
+    "alice",
+    "YANDEX_RESPONSES_URL",
+    userSecrets,
+    "https://ai.api.cloud.yandex.net/v1/responses"
+  );
 
   const res = await fetchForProvider("alice", url, {
     method: "POST",
@@ -475,20 +518,26 @@ const DEFAULT_GEN_SEARCH_URL = "https://searchapi.api.cloud.yandex.net/v2/gen/se
  *
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
-async function yandexGenSearch(query) {
+async function yandexGenSearch(query, userSecrets = null) {
   const folderId =
-    process.env.YANDEX_GEN_SEARCH_FOLDER_ID?.trim() || process.env.YANDEX_CLOUD_FOLDER_ID?.trim();
+    pickProviderField("alice_search", "YANDEX_GEN_SEARCH_FOLDER_ID", userSecrets) ||
+    pickProviderField("alice_search", "YANDEX_CLOUD_FOLDER_ID", userSecrets);
   const apiKey =
-    process.env.YANDEX_GEN_SEARCH_API_KEY?.trim() || process.env.YANDEX_CLOUD_API_KEY?.trim();
+    pickProviderField("alice_search", "YANDEX_GEN_SEARCH_API_KEY", userSecrets) ||
+    pickProviderField("alice_search", "YANDEX_CLOUD_API_KEY", userSecrets);
   if (!folderId || !apiKey) {
     throw new Error(
       "Задайте каталог и ключ: YANDEX_GEN_SEARCH_FOLDER_ID + YANDEX_GEN_SEARCH_API_KEY или YANDEX_CLOUD_FOLDER_ID + YANDEX_CLOUD_API_KEY"
     );
   }
 
-  const url = process.env.YANDEX_GEN_SEARCH_URL?.trim() || DEFAULT_GEN_SEARCH_URL;
-  const searchType =
-    process.env.YANDEX_GEN_SEARCH_SEARCH_TYPE?.trim() || "SEARCH_TYPE_RU";
+  const url = pickProviderField("alice_search", "YANDEX_GEN_SEARCH_URL", userSecrets, DEFAULT_GEN_SEARCH_URL);
+  const searchType = pickProviderField(
+    "alice_search",
+    "YANDEX_GEN_SEARCH_SEARCH_TYPE",
+    userSecrets,
+    "SEARCH_TYPE_RU"
+  );
 
   const res = await fetchForProvider("alice_search", url, {
     method: "POST",

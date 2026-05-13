@@ -1,10 +1,11 @@
 import "dotenv/config";
-import crypto from "node:crypto";
 import express from "express";
+import cookieParser from "cookie-parser";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import swaggerUi from "swagger-ui-express";
+import { initDatabase } from "./src/db.js";
 import {
   PROVIDER_IDS,
   PROVIDER_LABELS,
@@ -26,82 +27,33 @@ import {
   requestLoggerMiddleware,
   summarizeQueryBody,
 } from "./src/logger.js";
+import { protectHtmlPages, requireUserApiKey } from "./src/auth/middleware.js";
+import { assertWithinLimits, recordUsage } from "./src/services/limits.js";
+import { chargeForQueries } from "./src/services/balance.js";
+import {
+  addSearchHistory,
+  createStreamHistorySummary,
+  consumeStreamHistoryEvent,
+  summarizeSearchOutcomeForHistory,
+} from "./src/services/history.js";
+import authRoutes from "./src/routes/auth.js";
+import cabinetRoutes from "./src/routes/cabinet.js";
+import cabinetSearchRoutes from "./src/routes/cabinetSearch.js";
+import adminRoutes from "./src/routes/admin.js";
+import paymentsRoutes from "./src/routes/payments.js";
 
 registerGlobalErrorHandlers();
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const app = express();
 const PORT = Number(process.env.PORT) || 3847;
+const publicDir = join(__dirname, "public");
 
-/** За nginx / балансировщиком — для `req.ip` и X-Forwarded-For. Отключить: `TRUST_PROXY=0`. */
 app.set("trust proxy", process.env.TRUST_PROXY !== "0");
-
 app.use(requestLoggerMiddleware);
-
-/**
- * HTTP Basic для UI, статики, Swagger и openapi — не для `/api/*`, чтобы не мешать `Authorization: Bearer` у POST API.
- * Задайте оба: SITE_BASIC_AUTH_USER и SITE_BASIC_AUTH_PASSWORD (в .env на проде).
- */
-function siteBasicAuthMiddleware(req, res, next) {
-  const user = process.env.SITE_BASIC_AUTH_USER?.trim();
-  const passRaw = process.env.SITE_BASIC_AUTH_PASSWORD;
-  const pass = typeof passRaw === "string" ? passRaw : "";
-  if (!user || !pass) {
-    next();
-    return;
-  }
-  if (req.path.startsWith("/api/")) {
-    next();
-    return;
-  }
-
-  const auth = req.headers.authorization;
-  if (typeof auth !== "string" || !auth.startsWith("Basic ")) {
-    reject();
-    return;
-  }
-  let decoded = "";
-  try {
-    decoded = Buffer.from(auth.slice(6), "base64").toString("utf8");
-  } catch {
-    reject();
-    return;
-  }
-  const colon = decoded.indexOf(":");
-  const u = colon >= 0 ? decoded.slice(0, colon) : decoded;
-  const p = colon >= 0 ? decoded.slice(colon + 1) : "";
-  try {
-    const userBuf = Buffer.from(user, "utf8");
-    const uBuf = Buffer.from(u, "utf8");
-    const passBuf = Buffer.from(pass, "utf8");
-    const pBuf = Buffer.from(p, "utf8");
-    const uOk = uBuf.length === userBuf.length && crypto.timingSafeEqual(uBuf, userBuf);
-    const pOk = pBuf.length === passBuf.length && crypto.timingSafeEqual(pBuf, passBuf);
-    if (uOk && pOk) {
-      next();
-      return;
-    }
-  } catch {
-    reject();
-    return;
-  }
-  reject();
-
-  function reject() {
-    logEvent("warn", "site_basic_auth:rejected", {
-      ...getRequestLogContext(req),
-      path: req.path,
-      method: req.method,
-    });
-    res.status(401);
-    res.setHeader("WWW-Authenticate", 'Basic realm="AI Searcher"');
-    res.end("Unauthorized");
-  }
-}
-
-app.use(siteBasicAuthMiddleware);
-
+app.use(cookieParser());
 app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: false }));
 
 app.use((req, res, next) => {
   res.setHeader("X-AI-Searcher", "1");
@@ -111,52 +63,12 @@ app.use((req, res, next) => {
   next();
 });
 
-/**
- * @param {(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => unknown | Promise<unknown>} fn
- */
 function asyncRoute(fn) {
   return (req, res, next) => {
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 
-/** Если задан API_SECRET — POST /api/query только с заголовком (интеграции, Postman). */
-function requireApiSecret(req, res, next) {
-  const secret = process.env.API_SECRET?.trim();
-  if (!secret) {
-    next();
-    return;
-  }
-  const bearer = req.headers.authorization;
-  const key = req.headers["x-api-key"];
-  let ok = false;
-  if (typeof bearer === "string") {
-    if (bearer.startsWith("Bearer ")) {
-      ok = bearer.slice(7) === secret;
-    } else if (bearer === secret) {
-      ok = true;
-    }
-  }
-  if (!ok && typeof key === "string" && key === secret) ok = true;
-  if (!ok) {
-    logEvent("warn", "auth:rejected", {
-      ...getRequestLogContext(req),
-      hasAuthorization: Boolean(req.headers.authorization),
-      hasXApiKey: Boolean(req.headers["x-api-key"]),
-    });
-    res.status(401).json({
-      error:
-        "Нужна авторизация: в .env задан API_SECRET. Передайте заголовок Authorization: Bearer <секрет> или X-API-Key: <секрет>.",
-    });
-    return;
-  }
-  next();
-}
-
-/**
- * @param {unknown} body
- * @returns {{ ok: true, queries: string[], selected: string[], batchInput: boolean } | { ok: false, status: number, error: string }}
- */
 function parseQueryBody(body) {
   const raw = body?.query;
   const rawQueries = body?.queries;
@@ -210,6 +122,13 @@ function sseWrite(res, obj) {
   res.write(`data: ${JSON.stringify(obj)}\n\n`);
 }
 
+async function runAuthorizedSearch(req, queryCount) {
+  const userId = req.apiAuth.userId;
+  await assertWithinLimits({ userId, queryCount });
+  await chargeForQueries({ userId, queryCount });
+  return null;
+}
+
 const xlsxVendorPath = join(__dirname, "node_modules", "xlsx", "xlsx.mjs");
 app.get("/vendor/xlsx.mjs", (_req, res, next) => {
   if (!existsSync(xlsxVendorPath)) {
@@ -225,21 +144,22 @@ app.use((_req, res, next) => {
   next();
 });
 
-/** Публично: какие модели есть в билде и какие настроены в .env (без секретов). */
-app.get("/api/meta", (req, res, next) => {
-  try {
-    const configured = getConfiguredProviders();
-    const providers = PROVIDER_IDS.map((id) => ({
-      id,
-      label: PROVIDER_LABELS[id] ?? id,
-      configured: Boolean(configured[id]),
-      proxy: Boolean(getOutboundProxyUrl(id)),
-    }));
-    res.json({ providers });
-  } catch (e) {
-    next(e);
-  }
-});
+app.use("/api/auth", authRoutes);
+app.use("/api/cabinet", cabinetRoutes);
+app.use("/api/cabinet", cabinetSearchRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/payments", paymentsRoutes);
+
+app.get("/api/meta", requireUserApiKey, asyncRoute(async (req, res) => {
+  const configured = getConfiguredProviders(null);
+  const providers = PROVIDER_IDS.map((id) => ({
+    id,
+    label: PROVIDER_LABELS[id] ?? id,
+    configured: Boolean(configured[id]),
+    proxy: Boolean(getOutboundProxyUrl(id)),
+  }));
+  res.json({ providers });
+}));
 
 const openApiPath = join(__dirname, "openapi", "openapi.json");
 let openApiSpec = null;
@@ -250,18 +170,14 @@ try {
     message: e?.message || String(e),
     stack: e instanceof Error ? e.stack : undefined,
   });
-  console.warn("OpenAPI:", e?.message || String(e));
 }
 if (openApiSpec) {
-  app.get("/openapi.json", (_req, res) => {
+  app.get("/openapi.json", requireUserApiKey, (_req, res) => {
     res.json(openApiSpec);
   });
-  /** Без слэша Swagger UI часто не открывается — ведём на канонический путь. */
-  // app.get("/api-docs", (_req, res) => {
-  //   res.redirect(308, "/api-docs/");
-  // });
   app.use(
     "/api-docs/",
+    requireUserApiKey,
     swaggerUi.serve,
     swaggerUi.setup(openApiSpec, {
       customSiteTitle: "AI Searcher API",
@@ -270,56 +186,55 @@ if (openApiSpec) {
   );
 }
 
-/** Поток SSE: ячейки таблицы по мере готовности (JSON в событиях `data:`). */
 app.post(
   "/api/query/stream",
-  requireApiSecret,
+  requireUserApiKey,
   asyncRoute(async (req, res) => {
-    logEvent("debug", "api:query_stream:body", {
-      ...getRequestLogContext(req),
-      ...summarizeQueryBody(req.body),
-    });
     const parsed = parseQueryBody(req.body);
     if (!parsed.ok) {
-      logEvent("warn", "api:query_stream:validation", {
-        ...getRequestLogContext(req),
-        status: parsed.status,
-        error: parsed.error,
-        ...summarizeQueryBody(req.body),
-      });
       res.status(parsed.status).json({ error: parsed.error });
       return;
     }
     const { queries, selected } = parsed;
-    logEvent("info", "api:query_stream:start", {
-      ...getRequestLogContext(req),
-      queryCount: queries.length,
-      providers: selected,
-    });
+    let userSecrets;
+    try {
+      userSecrets = await runAuthorizedSearch(req, queries.length);
+    } catch (e) {
+      res.status(e?.status || 500).json({ error: e?.message || "Ошибка доступа" });
+      return;
+    }
     res.status(200);
     res.setHeader("Content-Type", "text/event-stream; charset=utf-8");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
     if (typeof res.flushHeaders === "function") res.flushHeaders();
-
     try {
-      const logMeta = { requestId: req.requestId };
-      await streamSearchProgress(queries, selected, (ev) => {
-        try {
-          sseWrite(res, ev);
-        } catch (writeErr) {
-          logError(writeErr, req, {
-            phase: "sseWrite",
-            eventType: ev?.type,
-          });
-        }
-      }, logMeta);
-      res.end();
-      logEvent("info", "api:query_stream:done", {
-        ...getRequestLogContext(req),
+      const streamHist = createStreamHistorySummary();
+      await streamSearchProgress(
+        queries,
+        selected,
+        (ev) => {
+          consumeStreamHistoryEvent(streamHist, ev);
+          try {
+            sseWrite(res, ev);
+          } catch (writeErr) {
+            logError(writeErr, req, { phase: "sseWrite" });
+          }
+        },
+        { requestId: req.requestId, userId: req.apiAuth.userId },
+        userSecrets
+      );
+      await recordUsage({ userId: req.apiAuth.userId, queryCount: queries.length });
+      await addSearchHistory({
+        userId: req.apiAuth.userId,
+        queryText: queries.length === 1 ? queries[0] : null,
+        providers: selected,
+        batch: queries.length > 1,
         queryCount: queries.length,
+        resultSummary: streamHist,
       });
+      res.end();
     } catch (e) {
       logError(e, req, { phase: "api:query_stream" });
       try {
@@ -334,104 +249,107 @@ app.post(
 
 app.post(
   "/api/query",
-  requireApiSecret,
+  requireUserApiKey,
   asyncRoute(async (req, res) => {
-    logEvent("debug", "api:query:body", {
-      ...getRequestLogContext(req),
-      ...summarizeQueryBody(req.body),
-    });
     const parsed = parseQueryBody(req.body);
     if (!parsed.ok) {
-      logEvent("warn", "api:query:validation", {
-        ...getRequestLogContext(req),
-        status: parsed.status,
-        error: parsed.error,
-        ...summarizeQueryBody(req.body),
-      });
       res.status(parsed.status).json({ error: parsed.error });
       return;
     }
     const { queries, selected, batchInput } = parsed;
-
-    if (batchInput) {
-      try {
-        logEvent("info", "api:query:batch:start", {
-          ...getRequestLogContext(req),
-          queryCount: queries.length,
-          providers: selected,
-        });
-        const out = await searchBatchAcrossProviders(queries, selected, {
-          requestId: req.requestId,
-        });
-        res.json(out);
-        logEvent("info", "api:query:batch:done", {
-          ...getRequestLogContext(req),
-          queryCount: queries.length,
-          items: out.items?.length,
-        });
-      } catch (e) {
-        logError(e, req, { phase: "api:query:batch" });
-        res.status(500).json({
-          error: e?.message || "Внутренняя ошибка",
-          batch: true,
-          items: [],
-          skippedLabels: [],
-        });
-      }
+    let userSecrets;
+    try {
+      userSecrets = await runAuthorizedSearch(req, queries.length);
+    } catch (e) {
+      res.status(e?.status || 500).json({ error: e?.message || "Ошибка доступа" });
       return;
     }
-
+    const logMeta = { requestId: req.requestId, userId: req.apiAuth.userId };
     try {
-      logEvent("info", "api:query:single:start", {
-        ...getRequestLogContext(req),
+      const out = batchInput
+        ? await searchBatchAcrossProviders(queries, selected, logMeta, userSecrets)
+        : await searchAcrossProviders(queries[0], selected, logMeta, userSecrets);
+      await recordUsage({ userId: req.apiAuth.userId, queryCount: queries.length });
+      await addSearchHistory({
+        userId: req.apiAuth.userId,
+        queryText: batchInput ? null : queries[0],
         providers: selected,
-        queryChars: queries[0]?.length,
+        batch: batchInput,
+        queryCount: queries.length,
+        resultSummary: summarizeSearchOutcomeForHistory({ batch: batchInput, out }),
       });
-      const out = await searchAcrossProviders(queries[0], selected, {
-        requestId: req.requestId,
-      });
-      if (out.error) {
-        logEvent("warn", "api:query:single:provider_error", {
-          ...getRequestLogContext(req),
-          error: out.error,
-          skippedLabels: out.skippedLabels,
-        });
-        res.status(400).json(out);
-        return;
-      }
       res.json(out);
-      logEvent("info", "api:query:single:done", {
-        ...getRequestLogContext(req),
-        resultCount: out.results?.length,
-      });
     } catch (e) {
-      logError(e, req, { phase: "api:query:single" });
-      res.status(500).json({
-        error: e?.message || "Внутренняя ошибка",
-        results: [],
-        skippedLabels: [],
-      });
+      logError(e, req, { phase: "api:query" });
+      res.status(e?.status || 500).json({ error: e?.message || "Внутренняя ошибка" });
     }
   })
 );
 
-const publicDir = join(__dirname, "public");
-app.get("/", (_req, res) => {
-  res.sendFile(join(publicDir, "index.html"));
+app.get("/login", (_req, res) => {
+  res.sendFile(join(publicDir, "auth", "login.html"));
 });
+app.get("/register", (_req, res) => {
+  res.sendFile(join(publicDir, "auth", "register.html"));
+});
+app.get("/forgot-password", (_req, res) => {
+  res.sendFile(join(publicDir, "auth", "forgot-password.html"));
+});
+app.get("/reset-password", (_req, res) => {
+  res.sendFile(join(publicDir, "auth", "reset-password.html"));
+});
+app.get("/verify-email", (_req, res) => {
+  res.sendFile(join(publicDir, "auth", "verify-email.html"));
+});
+app.get(["/legal", "/legal/"], (_req, res) => {
+  res.sendFile(join(publicDir, "legal", "index.html"));
+});
+app.get(["/legal/oferta", "/legal/oferta/"], (_req, res) => {
+  res.sendFile(join(publicDir, "legal", "oferta.html"));
+});
+function sendCabinetIndex(_req, res) {
+  res.sendFile(join(publicDir, "cabinet", "index.html"));
+}
+
+function sendAdminIndex(_req, res) {
+  res.sendFile(join(publicDir, "admin", "index.html"));
+}
+
+app.get(["/cabinet", "/cabinet/"], sendCabinetIndex);
+app.get("/cabinet/search", (_req, res) => {
+  res.sendFile(join(publicDir, "cabinet", "search.html"));
+});
+function sendAdminUserPage(_req, res) {
+  res.sendFile(join(publicDir, "admin", "user", "index.html"));
+}
+
+app.get(["/admin", "/admin/"], sendAdminIndex);
+app.get("/admin/user", sendAdminUserPage);
+app.get("/admin/user/", sendAdminUserPage);
+
+app.get("/", (_req, res) => {
+  res.redirect(302, "/cabinet/");
+});
+app.use(protectHtmlPages);
 app.use(express.static(publicDir));
 
 app.use((req, res) => {
   logEvent("warn", "http:404", getRequestLogContext(req));
-  const base = `http://127.0.0.1:${PORT}`;
+  const path = req.path || "/";
+  if (path.startsWith("/api/")) {
+    res.status(404).json({
+      error: "Маршрут API не найден.",
+      path,
+      method: req.method,
+    });
+    return;
+  }
   res.status(404).type("html").send(`<!DOCTYPE html>
 <html lang="ru"><meta charset="utf-8"><title>404</title>
 <body style="font:15px system-ui;padding:1.5rem;max-width:40rem">
 <h1>404</h1>
 <p>Путь: <code>${escapeHtml(req.path)}</code></p>
-<p>HTTP API: <code>POST ${escapeHtml("/api/query")}</code> · <a href="${base}/api-docs/">Swagger UI</a> (или <a href="${base}/api-docs">/api-docs</a> → редирект) · <a href="${base}/openapi.json">openapi.json</a></p>
-<p>Интерфейс: <a href="${base}/">главная</a>.</p>
-<p>Адрес сервера: <code>http://localhost:${PORT}</code> (без <code>https://</code> для порта Node).</p>
+<p><a href="/cabinet/">Кабинет</a> · <a href="/login">Вход</a></p>
 </body></html>`);
 });
 
@@ -448,18 +366,22 @@ app.use((err, req, res, next) => {
   res.status(500).type("text").send(err?.message || "Internal error");
 });
 
-app.listen(PORT, () => {
-  logStartup({ port: PORT });
-  const base = `http://localhost:${PORT}`;
-  console.log(`AI Searcher: ${base}`);
-  console.log(`  API:     POST ${base}/api/query  |  POST ${base}/api/query/stream (SSE)`);
-  if (openApiSpec) {
-    console.log(`  Swagger: ${base}/api-docs/  (редирект с /api-docs)`);
-    console.log(`  OpenAPI: ${base}/openapi.json`);
-  }
+async function start() {
+  await initDatabase();
+  app.listen(PORT, () => {
+    logStartup({ port: PORT });
+    const base = `http://localhost:${PORT}`;
+    console.log(`AI Searcher: ${base}`);
+    console.log(`  Кабинет: ${base}/cabinet/`);
+    console.log(`  API:     POST ${base}/api/query (API-ключ пользователя)`);
+  });
+}
+
+start().catch((e) => {
+  console.error(e);
+  process.exit(1);
 });
 
-/** @param {string} s */
 function escapeHtml(s) {
   return s
     .replace(/&/g, "&amp;")
