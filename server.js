@@ -366,7 +366,22 @@ app.use((err, req, res, next) => {
   res.status(500).type("text").send(err?.message || "Internal error");
 });
 
+function assertCabinetSecrets() {
+  const jwt = process.env.JWT_SECRET?.trim();
+  if (!jwt || jwt.length < 32) {
+    throw new Error(
+      "В .env задайте JWT_SECRET не короче 32 символов (пример: openssl rand -hex 32)."
+    );
+  }
+  if (!process.env.APP_ENCRYPTION_KEY?.trim()) {
+    throw new Error(
+      "В .env задайте APP_ENCRYPTION_KEY (64 символа hex или любая строка — будет свёрнута в ключ AES-256)."
+    );
+  }
+}
+
 async function start() {
+  assertCabinetSecrets();
   await initDatabase();
   app.listen(PORT, () => {
     logStartup({ port: PORT });
