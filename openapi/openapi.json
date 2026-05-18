@@ -2,7 +2,7 @@
   "openapi": "3.0.3",
   "info": {
     "title": "AI Searcher API",
-    "description": "Запрос к нескольким LLM-провайдерам за один вызов: **`POST /api/query`** (JSON целиком) или **`POST /api/query/stream`** (SSE, по одной ячейке). **`GET /api/meta`** — какие модели настроены в `.env` (без секретов). Если задан `API_SECRET` — **Authorization: Bearer** или **X-API-Key** только для POST.",
+    "description": "Запрос к нескольким LLM-провайдерам за один вызов: **`POST /api/query`** (JSON целиком) или **`POST /api/query/stream`** (SSE, по одной ячейке). **`GET /api/meta`** и совместимый алиас **`GET /api/v1/providers`** — какие модели настроены в `.env` (без секретов).",
     "version": "1.0.0"
   },
   "servers": [
@@ -26,8 +26,28 @@
       "get": {
         "tags": ["Query"],
         "summary": "Список моделей и настройка в .env",
-        "description": "Публично, **без** заголовка `API_SECRET`. Для UI: какие провайдеры доступны по ключам на сервере; поле **`proxy`** — задан ли для провайдера исходящий HTTP(S)-прокси (без URL).",
+        "description": "Требует API-ключ пользователя в `X-API-Key` или `Authorization: Bearer <ключ>`. Для UI: какие провайдеры доступны по ключам на сервере; поле **`proxy`** — задан ли для провайдера исходящий HTTP(S)-прокси (без URL).",
         "operationId": "getMeta",
+        "security": [{ "bearerAuth": [] }, { "apiKeyHeader": [] }],
+        "responses": {
+          "200": {
+            "description": "Успех",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MetaResponse" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/providers": {
+      "get": {
+        "tags": ["Query"],
+        "summary": "Список моделей и настройка в .env (совместимый алиас)",
+        "description": "Совместимый алиас для `GET /api/meta`. Требует API-ключ пользователя в `X-API-Key` или `Authorization: Bearer <ключ>`.",
+        "operationId": "getV1Providers",
+        "security": [{ "bearerAuth": [] }, { "apiKeyHeader": [] }],
         "responses": {
           "200": {
             "description": "Успех",

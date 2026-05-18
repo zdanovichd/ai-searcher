@@ -150,7 +150,7 @@ app.use("/api/cabinet", cabinetSearchRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/payments", paymentsRoutes);
 
-app.get("/api/meta", requireUserApiKey, asyncRoute(async (req, res) => {
+function sendProvidersMeta(_req, res) {
   const configured = getConfiguredProviders(null);
   const providers = PROVIDER_IDS.map((id) => ({
     id,
@@ -159,7 +159,10 @@ app.get("/api/meta", requireUserApiKey, asyncRoute(async (req, res) => {
     proxy: Boolean(getOutboundProxyUrl(id)),
   }));
   res.json({ providers });
-}));
+}
+
+app.get("/api/meta", requireUserApiKey, sendProvidersMeta);
+app.get("/api/v1/providers", requireUserApiKey, sendProvidersMeta);
 
 const openApiPath = join(__dirname, "openapi", "openapi.json");
 let openApiSpec = null;
