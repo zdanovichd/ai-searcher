@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <title>Личный кабинет — AI Searcher</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -11,7 +12,7 @@
       href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/shared/cabinet.css?v=7" />
+    <link rel="stylesheet" href="/shared/cabinet.css?v=8" />
   </head>
   <body class="app-page">
     <div class="noise" aria-hidden="true"></div>
@@ -67,7 +68,7 @@
           <button type="button" id="btn-refresh-provider-balances" class="btn-secondary">Обновить</button>
         </div>
         <p id="provider-balances-status" class="status" style="margin-top: 0.5rem"></p>
-        <div id="provider-balances" class="app-grid app-grid-3" style="margin-top: 1rem">Загрузка…</div>
+        <div id="provider-balances" class="app-grid app-grid-3" style="margin-top: 1rem"><p class="muted" style="animation: skeleton-pulse 1.2s ease-in-out infinite">Загрузка балансов…</p></div>
       </section>
 
       <section class="app-section app-card">
@@ -114,6 +115,6 @@
         </div>
       </section>
     </main>
-    <script type="module" src="/cabinet/app.js?v=4"></script>
+    <script type="module" src="/cabinet/app.js?v=18"></script>
   </body>
 </html>

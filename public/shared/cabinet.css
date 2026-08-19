@@ -11,8 +11,9 @@
   --danger: #f07178;
   --ok: #7fd99a;
   --shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
-  --radius-lg: 16px;
-  --radius-md: 12px;
+  --accent-glow: rgba(232, 165, 75, 0.18);
+  --radius-lg: 14px;
+  --radius-md: 10px;
   --radius-sm: 8px;
   --font-display: "Fraunces", Georgia, serif;
   --font-body: "IBM Plex Sans", system-ui, sans-serif;
@@ -121,12 +122,20 @@ body.app-page .app-nav a {
   color: var(--text);
   background: rgba(255, 255, 255, 0.03);
   border-color: var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.app-page .app-nav a:hover:not(.is-active) {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(232, 165, 75, 0.3);
+  color: var(--accent-strong);
 }
 
 body.app-page .app-nav a.is-active {
   color: #1a1208;
   background: var(--accent);
   border-color: var(--accent);
+  box-shadow: 0 2px 10px var(--accent-glow);
 }
 
 body.app-page .app-nav .btn-secondary {
@@ -141,7 +150,7 @@ body.app-page .app-section {
 }
 
 body.app-page .app-section + .app-section {
-  margin-top: 1rem;
+  margin-top: 1.5rem;
 }
 
 body.app-page .app-grid {
@@ -163,6 +172,11 @@ body.app-page .app-card {
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow);
   padding: 1.2rem 1.3rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+body.app-page .app-card:hover {
+  border-color: rgba(232, 165, 75, 0.2);
 }
 
 body.app-page .app-card h2,
@@ -206,13 +220,15 @@ body.app-page select {
   background: var(--bg);
   color: var(--text);
   font: inherit;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 body.app-page input:focus,
 body.app-page textarea:focus,
 body.app-page select:focus {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 body.app-page .btn,
@@ -223,8 +239,25 @@ body.app-page button.btn {
   font: inherit;
   font-weight: 600;
   cursor: pointer;
-  background: var(--accent);
+  background: linear-gradient(135deg, var(--accent), var(--accent-strong, var(--accent)));
   color: #1a1208;
+  box-shadow: 0 2px 12px var(--accent-glow);
+  transition: transform 0.15s ease, filter 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.app-page .btn:hover:not(:disabled) {
+  filter: brightness(1.08);
+  box-shadow: 0 4px 20px rgba(232, 165, 75, 0.3);
+}
+
+body.app-page .btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+body.app-page .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
 }
 
 body.app-page a.btn-secondary {
@@ -244,6 +277,15 @@ body.app-page .btn-secondary {
   background: transparent;
   color: var(--text);
   border: 1px solid var(--border);
+  box-shadow: none;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+body.app-page button.btn-secondary:hover,
+body.app-page .btn-secondary:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: var(--accent-glow);
+  box-shadow: 0 0 0 3px var(--accent-glow);
 }
 
 body.app-page button.btn-danger,
@@ -291,6 +333,10 @@ body.app-page .metric-value {
 body.app-page .metric-label {
   color: var(--muted);
   font-size: 0.88rem;
+}
+
+body.app-page .app-card:has(.metric-value) {
+  border-top: 2px solid var(--accent);
 }
 
 body.app-page .badge {
@@ -352,6 +398,19 @@ body.app-page th {
   letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--muted);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+body.app-page tbody tr {
+  transition: background 0.12s ease;
+}
+
+body.app-page tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+body.app-page tbody tr:hover {
+  background: rgba(232, 165, 75, 0.04);
 }
 
 body.app-page code,
@@ -575,4 +634,25 @@ body.app-page .pwd-dialog-actions {
   justify-content: flex-end;
   gap: 0.5rem;
   margin-top: 0.35rem;
+}
+
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 1; }
+}
+
+body.app-page .app-grid-3 .app-card .metric-label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+body.app-page .app-grid-3 .app-card .metric-label::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
 }
