@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "nodemon server.js",
     "provider-balances": "node scripts/provider-balances.js"
   },
   "dependencies": {
@@ -18,5 +18,8 @@
     "swagger-ui-express": "^5.0.1",
     "undici": "^6.21.3",
     "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "nodemon": "^3"
   }
 }

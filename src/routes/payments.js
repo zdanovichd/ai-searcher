@@ -5,11 +5,7 @@ import { verifyRobokassaResult } from "../services/robokassa.js";
 
 const router = Router();
 
-function asyncRoute(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
+import { asyncRoute } from "../utils/asyncRoute.js";
 
 function pickRobokassaParams(req) {
   return { ...(req.query || {}), ...(req.body || {}) };

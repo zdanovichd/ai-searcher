@@ -22,9 +22,9 @@ export const PROVIDER_LABELS = {
   chatgpt: "ChatGPT",
   deepseek: "DeepSeek",
   perplexity: "Perplexity",
-  google: "Google AI (Gemini)",
-  alice: "Алиса AI (Yandex Cloud LLM)",
-  alice_search: "Алиса в Поиске (Yandex Search API)",
+  google: "Google Gemini",
+  alice: "Алиса AI",
+  alice_search: "Алиса в Поиске",
 };
 
 const TIMEOUT_MS = 120_000;

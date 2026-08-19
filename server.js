@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { existsSync, readFileSync } from "node:fs";
 import swaggerUi from "swagger-ui-express";
-import { initDatabase } from "./src/db.js";
+import { initDatabase, getPool } from "./src/db.js";
 import {
   PROVIDER_IDS,
   PROVIDER_LABELS,
@@ -397,13 +397,26 @@ function assertCabinetSecrets() {
 async function start() {
   assertCabinetSecrets();
   await initDatabase();
-  app.listen(PORT, () => {
+  const server = app.listen(PORT, () => {
     logStartup({ port: PORT });
     const base = `http://localhost:${PORT}`;
     console.log(`AI Searcher: ${base}`);
     console.log(`  Кабинет: ${base}/cabinet/`);
     console.log(`  API:     POST ${base}/api/query (API-ключ пользователя)`);
   });
+
+  function shutdown(signal) {
+    console.log(`\n${signal} received, shutting down…`);
+    server.close(() => {
+      getPool()
+        .end()
+        .then(() => process.exit(0))
+        .catch(() => process.exit(1));
+    });
+    setTimeout(() => process.exit(1), 10_000);
+  }
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 }
 
 start().catch((e) => {

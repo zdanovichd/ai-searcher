@@ -19,11 +19,7 @@ const router = Router();
 
 const UUID_PARAM_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function asyncRoute(fn) {
-  return (req, res, next) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
-}
+import { asyncRoute } from "../utils/asyncRoute.js";
 
 router.use(requireAccessAuth, requireAdmin);
 
