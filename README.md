@@ -183,7 +183,7 @@ curl -sS -X POST "http://localhost:3847/api/query" \
 | **Алиса** (Yandex, OpenAI-compatible Responses) | **`usage`**: `input_tokens`, `output_tokens`, `total_tokens` (как у OpenAI Responses API) | [OpenAI Responses — usage](https://platform.openai.com/docs/api-reference/responses/object#responses/object-usage) (совместимый контракт) |
 | **Алиса в Поиске** (`alice_search`, Yandex Search API GenSearch) | В ответе API **нет** нормализованного блока токенов — в UI поле **`usage`** будет **`null`** | [GenSearch в справке Search API](https://yandex.cloud/docs/search-api/api-ref/grpc/GenSearch/search) |
 
-**Лимиты и деньги** по ключу (остаток квоты, баланс) смотрите в **консолях биллинга** провайдера — в теле одного запроса это обычно не приходит.
+**Остаток денег у провайдеров** (не токены пользователя сервиса): блок «Баланс нейросетей» в `/cabinet/` или `GET /api/cabinet/provider-balances`, также `GET /api/admin/provider-balances` и `npm run provider-balances`. **Polza.ai** — `GET https://polza.ai/api/v1/balance` (один баланс на 5 моделей). **DeepSeek напрямую** — `GET /user/balance`. **Yandex (Алиса в Поиске)** — Billing API через `YANDEX_IAM_TOKEN` (или `yc iam create-token`); обычный Api-Key LLM для биллинга не подходит.
 
 В коде разбор унифицирован в `src/tokenUsage.js` (разные имена полей сводятся к одному виду).
 

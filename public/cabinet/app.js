@@ -3,6 +3,7 @@ import {
   formatDateTime,
   formatLimitUsage,
   formatMoney,
+  formatProviderBalance,
   formatRole,
 } from "/shared/copy.js";
 import { mountHistoryAnswersCell } from "/shared/history-summary.js?v=1";
@@ -111,6 +112,45 @@ async function loadProfile() {
   }
 }
 
+async function loadProviderBalances() {
+  const host = document.getElementById("provider-balances");
+  const status = document.getElementById("provider-balances-status");
+  if (!host) return;
+  host.textContent = "Загрузка…";
+  if (status) {
+    status.textContent = "";
+    status.classList.remove("ok", "error");
+  }
+  const res = await authFetch("/api/cabinet/provider-balances");
+  const data = await res.json().catch(() => ({}));
+  host.replaceChildren();
+  if (!res.ok) {
+    host.textContent = data.error || "Не удалось загрузить балансы провайдеров.";
+    status?.classList.add("error");
+    if (status) status.textContent = "Ошибка запроса.";
+    return;
+  }
+  if (status && data.fetchedAt) {
+    status.textContent = `Обновлено: ${formatDateTime(data.fetchedAt)}`;
+    status.classList.add("ok");
+  }
+  for (const item of data.items || []) {
+    const card = document.createElement("article");
+    card.className = "app-card";
+    const value = formatProviderBalance(item);
+    const extra = item.available === false ? " · недоступен" : "";
+    const hint = item.note && !item.error ? `<p class="muted" style="margin:0.35rem 0 0;font-size:0.85rem">${escapeHtml(item.note)}</p>` : "";
+    card.innerHTML = `<p class="metric-label">${escapeHtml(item.label || item.id)}</p><p class="metric-value" style="font-size:1.05rem">${escapeHtml(
+      String(value)
+    )}${escapeHtml(extra)}</p>${hint}`;
+    host.append(card);
+  }
+}
+
+document.getElementById("btn-refresh-provider-balances")?.addEventListener("click", () => {
+  loadProviderBalances();
+});
+
 async function loadBalance() {
   const [balanceRes, limitsRes] = await Promise.all([
     authFetch("/api/cabinet/balance"),
@@ -203,5 +243,6 @@ function escapeHtml(s) {
 
 await loadProfile();
 await loadBalance();
+await loadProviderBalances();
 await loadApiKeys();
 await loadHistory();

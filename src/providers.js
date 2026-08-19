@@ -40,13 +40,16 @@ function attachHttpStatus(err, status) {
 }
 
 export function getConfiguredProviders(userSecrets = null) {
+  const polzaKey = process.env.POLZA_API_KEY?.trim();
   const base = {
-    chatgpt: Boolean(process.env.OPENAI_API_KEY?.trim()),
-    deepseek: Boolean(process.env.DEEPSEEK_API_KEY?.trim()),
-    perplexity: Boolean(process.env.PERPLEXITY_API_KEY?.trim()),
-    google: Boolean(process.env.GOOGLE_AI_API_KEY?.trim()),
+    chatgpt: Boolean(process.env.OPENAI_API_KEY?.trim() || polzaKey),
+    deepseek: Boolean(process.env.DEEPSEEK_API_KEY?.trim() || polzaKey),
+    perplexity: Boolean(process.env.PERPLEXITY_API_KEY?.trim() || polzaKey),
+    google: Boolean(process.env.GOOGLE_AI_API_KEY?.trim() || polzaKey),
     alice: Boolean(
-      process.env.YANDEX_CLOUD_API_KEY?.trim() && process.env.YANDEX_CLOUD_FOLDER_ID?.trim()
+      (process.env.ALICE_BASE_URL?.trim() &&
+        (process.env.ALICE_API_KEY?.trim() || polzaKey || process.env.YANDEX_CLOUD_API_KEY?.trim())) ||
+        (process.env.YANDEX_CLOUD_API_KEY?.trim() && process.env.YANDEX_CLOUD_FOLDER_ID?.trim())
     ),
     alice_search: Boolean(
       (process.env.YANDEX_GEN_SEARCH_API_KEY?.trim() || process.env.YANDEX_CLOUD_API_KEY?.trim()) &&
@@ -55,12 +58,18 @@ export function getConfiguredProviders(userSecrets = null) {
   };
   if (!userSecrets) return base;
   return {
-    chatgpt: base.chatgpt || Boolean(userSecrets.chatgpt?.OPENAI_API_KEY?.trim()),
-    deepseek: base.deepseek || Boolean(userSecrets.deepseek?.DEEPSEEK_API_KEY?.trim()),
-    perplexity: base.perplexity || Boolean(userSecrets.perplexity?.PERPLEXITY_API_KEY?.trim()),
-    google: base.google || Boolean(userSecrets.google?.GOOGLE_AI_API_KEY?.trim()),
+    chatgpt: base.chatgpt || Boolean(userSecrets.chatgpt?.OPENAI_API_KEY?.trim() || userSecrets.polza?.POLZA_API_KEY?.trim()),
+    deepseek: base.deepseek || Boolean(userSecrets.deepseek?.DEEPSEEK_API_KEY?.trim() || userSecrets.polza?.POLZA_API_KEY?.trim()),
+    perplexity: base.perplexity || Boolean(userSecrets.perplexity?.PERPLEXITY_API_KEY?.trim() || userSecrets.polza?.POLZA_API_KEY?.trim()),
+    google: base.google || Boolean(userSecrets.google?.GOOGLE_AI_API_KEY?.trim() || userSecrets.polza?.POLZA_API_KEY?.trim()),
     alice:
       base.alice ||
+      Boolean(
+        userSecrets.alice?.ALICE_BASE_URL?.trim() &&
+          (userSecrets.alice?.ALICE_API_KEY?.trim() ||
+          userSecrets.polza?.POLZA_API_KEY?.trim() ||
+          userSecrets.alice?.YANDEX_CLOUD_API_KEY?.trim())
+      ) ||
       Boolean(
         userSecrets.alice?.YANDEX_CLOUD_API_KEY?.trim() &&
           userSecrets.alice?.YANDEX_CLOUD_FOLDER_ID?.trim()
@@ -88,6 +97,13 @@ function pickProviderField(providerId, field, userSecrets, fallback = "") {
   const fromEnv = process.env[field];
   if (typeof fromEnv === "string" && fromEnv.trim()) return fromEnv.trim();
   return fallback;
+}
+
+/** Ключ провайдера или общий POLZA_API_KEY (один ЛК Polza на несколько моделей). */
+function pickProviderApiKey(providerId, field, userSecrets) {
+  const direct = pickProviderField(providerId, field, userSecrets);
+  if (direct) return direct;
+  return pickProviderField(providerId, "POLZA_API_KEY", userSecrets);
 }
 
 /**
@@ -126,7 +142,7 @@ export async function runProvider(id, query, logMeta = {}, userSecrets = null) {
       case "chatgpt": {
         const out = await chatCompletionsViaFetch({
           providerId: "chatgpt",
-          apiKey: pickProviderField("chatgpt", "OPENAI_API_KEY", userSecrets),
+          apiKey: pickProviderApiKey("chatgpt", "OPENAI_API_KEY", userSecrets),
           baseURL: pickProviderField("chatgpt", "OPENAI_BASE_URL", userSecrets, "https://api.openai.com/v1"),
           model: pickProviderField("chatgpt", "OPENAI_MODEL", userSecrets, "gpt-4o-mini"),
           query,
@@ -139,7 +155,7 @@ export async function runProvider(id, query, logMeta = {}, userSecrets = null) {
       case "deepseek": {
         const out = await chatCompletionsViaFetch({
           providerId: "deepseek",
-          apiKey: pickProviderField("deepseek", "DEEPSEEK_API_KEY", userSecrets),
+          apiKey: pickProviderApiKey("deepseek", "DEEPSEEK_API_KEY", userSecrets),
           baseURL: pickProviderField("deepseek", "DEEPSEEK_BASE_URL", userSecrets, "https://api.deepseek.com"),
           model: pickProviderField("deepseek", "DEEPSEEK_MODEL", userSecrets, "deepseek-chat"),
           query,
@@ -249,8 +265,19 @@ function enrichGeoAndAuthHints(id, msg) {
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function perplexitySonar(query, userSecrets = null) {
-  const apiKey = pickProviderField("perplexity", "PERPLEXITY_API_KEY", userSecrets);
+  const apiKey = pickProviderApiKey("perplexity", "PERPLEXITY_API_KEY", userSecrets);
   if (!apiKey) throw new Error("Не задан PERPLEXITY_API_KEY");
+
+  const polzaBase = pickProviderField("perplexity", "PERPLEXITY_BASE_URL", userSecrets, "");
+  if (polzaBase) {
+    return chatCompletionsViaFetch({
+      providerId: "perplexity",
+      apiKey,
+      baseURL: polzaBase,
+      model: pickProviderField("perplexity", "PERPLEXITY_MODEL", userSecrets, "perplexity/sonar"),
+      query,
+    });
+  }
 
   const model = pickProviderField("perplexity", "PERPLEXITY_MODEL", userSecrets, "sonar");
   const url = pickProviderField(
@@ -370,8 +397,19 @@ const GEMINI_MODEL_FALLBACKS = [
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function geminiChat(query, logMeta = {}, userSecrets = null) {
-  const apiKey = pickProviderField("google", "GOOGLE_AI_API_KEY", userSecrets);
+  const apiKey = pickProviderApiKey("google", "GOOGLE_AI_API_KEY", userSecrets);
   if (!apiKey) throw new Error("Не задан GOOGLE_AI_API_KEY");
+
+  const polzaBase = pickProviderField("google", "GOOGLE_BASE_URL", userSecrets, "");
+  if (polzaBase) {
+    return chatCompletionsViaFetch({
+      providerId: "google",
+      apiKey,
+      baseURL: polzaBase,
+      model: pickProviderField("google", "GOOGLE_GEMINI_MODEL", userSecrets, "google/gemini-3.7-flash"),
+      query,
+    });
+  }
 
   const requested = pickProviderField("google", "GOOGLE_GEMINI_MODEL", userSecrets, "");
   const candidates = [...new Set([...(requested ? [requested] : []), ...GEMINI_MODEL_FALLBACKS])];
@@ -461,6 +499,21 @@ async function geminiGenerateOnce(apiKey, model, query) {
  * @returns {Promise<{ text: string, usage: TokenUsage | null, httpStatus: number }>}
  */
 async function yandexAlice(query, userSecrets = null) {
+  const polzaBase = pickProviderField("alice", "ALICE_BASE_URL", userSecrets, "");
+  if (polzaBase) {
+    const apiKey =
+      pickProviderField("alice", "ALICE_API_KEY", userSecrets) ||
+      pickProviderApiKey("alice", "POLZA_API_KEY", userSecrets);
+    if (!apiKey) throw new Error("Задайте ALICE_API_KEY или POLZA_API_KEY для маршрута через Polza");
+    return chatCompletionsViaFetch({
+      providerId: "alice",
+      apiKey,
+      baseURL: polzaBase,
+      model: pickProviderField("alice", "ALICE_MODEL", userSecrets, "yandex/aliceai-llm"),
+      query,
+    });
+  }
+
   const folderId = pickProviderField("alice", "YANDEX_CLOUD_FOLDER_ID", userSecrets);
   const apiKey = pickProviderField("alice", "YANDEX_CLOUD_API_KEY", userSecrets);
   if (!folderId || !apiKey) throw new Error("Задайте YANDEX_CLOUD_FOLDER_ID и YANDEX_CLOUD_API_KEY");

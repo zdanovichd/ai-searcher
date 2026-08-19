@@ -4,7 +4,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "provider-balances": "node scripts/provider-balances.js"
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",

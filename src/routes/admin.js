@@ -13,6 +13,7 @@ import { findUserById, toPublicUser } from "../services/users.js";
 import { listApiKeys, revokeApiKey } from "../services/apiKeys.js";
 import { writeAudit } from "../services/audit.js";
 import { getRequestLogContext, logEvent } from "../logger.js";
+import { fetchProviderBalances } from "../services/providerBalances.js";
 
 const router = Router();
 
@@ -282,6 +283,14 @@ router.put(
       limits: await getUserLimits(req.params.id),
       usage: await getUsageSnapshot(req.params.id),
     });
+  })
+);
+
+router.get(
+  "/provider-balances",
+  asyncRoute(async (_req, res) => {
+    const items = await fetchProviderBalances();
+    res.json({ items });
   })
 );
 

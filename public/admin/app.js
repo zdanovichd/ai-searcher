@@ -1,5 +1,5 @@
 import { authFetch, logout, requireAuthPage } from "/shared/session.js";
-import { formatDateTime, formatMoney, formatRole } from "/shared/copy.js";
+import { formatDateTime, formatMoney, formatProviderBalance, formatRole } from "/shared/copy.js";
 import { promptAdminPassword } from "/shared/prompt-password.js?v=1";
 
 await requireAuthPage();
@@ -33,6 +33,29 @@ async function patchUserRole(userId, role) {
     return;
   }
   await loadUsers();
+}
+
+
+async function loadProviderBalances() {
+  const host = document.getElementById("provider-balances");
+  if (!host) return;
+  const res = await authFetch("/api/admin/provider-balances");
+  const data = await res.json().catch(() => ({}));
+  host.replaceChildren();
+  if (!res.ok) {
+    host.textContent = data.error || "Не удалось загрузить балансы провайдеров.";
+    return;
+  }
+  for (const item of data.items || []) {
+    const card = document.createElement("article");
+    card.className = "app-card";
+    const value = formatProviderBalance(item);
+    const extra = item.available === false ? " · недоступен" : "";
+    card.innerHTML = `<p class="metric-label">${escapeHtml(item.label || item.id)}</p><p class="metric-value" style="font-size:1.05rem">${escapeHtml(
+      String(value)
+    )}${escapeHtml(extra)}</p>`;
+    host.append(card);
+  }
 }
 
 async function loadStats() {
@@ -168,5 +191,6 @@ function escapeHtml(s) {
 }
 
 await loadStats();
+await loadProviderBalances();
 await loadUsers();
 await loadHistory();

@@ -45,3 +45,20 @@ export function formatLimitUsage(used, limit) {
   if (limit == null) return `${used} (без лимита)`;
   return `${used} из ${limit}`;
 }
+
+/** Остаток провайдера LLM (ответ GET /api/cabinet/provider-balances). */
+export function formatProviderBalance(item) {
+  if (!item || typeof item !== "object") return "—";
+  if (item.error) return item.error;
+  if (item.remaining != null) {
+    const cur = item.currency || "";
+    const n = Number(item.remaining);
+    const formatted = Number.isFinite(n)
+      ? new Intl.NumberFormat("ru-RU", { maximumFractionDigits: 4 }).format(n)
+      : String(item.remaining);
+    return cur ? `${formatted} ${cur}` : formatted;
+  }
+  if (item.note) return item.note;
+  if (!item.configured) return "Ключ не задан";
+  return "Нет данных";
+}

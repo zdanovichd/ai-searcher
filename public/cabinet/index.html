@@ -59,6 +59,18 @@
       </section>
 
       <section class="app-section app-card">
+        <div class="btn-row" style="justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 0.75rem">
+          <div>
+            <h2 style="margin: 0">Баланс нейросетей</h2>
+            <p class="app-lead" style="margin: 0.35rem 0 0">Остаток по API провайдеров (Polza, Yandex Cloud и др.), не токены кабинета.</p>
+          </div>
+          <button type="button" id="btn-refresh-provider-balances" class="btn-secondary">Обновить</button>
+        </div>
+        <p id="provider-balances-status" class="status" style="margin-top: 0.5rem"></p>
+        <div id="provider-balances" class="app-grid app-grid-3" style="margin-top: 1rem">Загрузка…</div>
+      </section>
+
+      <section class="app-section app-card">
         <h2>API-ключи</h2>
         <p class="app-lead">Для внешних интеграций используйте заголовок <code>X-API-Key</code> или <code>Authorization: Bearer</code>.</p>
         <form id="api-key-form" class="stack" style="max-width: 420px">
@@ -102,6 +114,6 @@
         </div>
       </section>
     </main>
-    <script type="module" src="/cabinet/app.js?v=3"></script>
+    <script type="module" src="/cabinet/app.js?v=4"></script>
   </body>
 </html>

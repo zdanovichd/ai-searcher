@@ -5,6 +5,7 @@ import { getOutboundProxyUrl } from "../proxyFetch.js";
 import { changePassword, toPublicUser, findUserById } from "../services/users.js";
 import { createApiKey, listApiKeys, revokeApiKey } from "../services/apiKeys.js";
 import { getUserBalance } from "../services/balance.js";
+import { fetchProviderBalances } from "../services/providerBalances.js";
 import { getUsageSnapshot, getUserLimits } from "../services/limits.js";
 import { listSearchHistory } from "../services/history.js";
 import { UserFacingError } from "../services/users.js";
@@ -71,6 +72,14 @@ router.get(
   "/balance",
   asyncRoute(async (req, res) => {
     res.json(await getUserBalance(req.authUser.id));
+  })
+);
+
+router.get(
+  "/provider-balances",
+  asyncRoute(async (_req, res) => {
+    const items = await fetchProviderBalances();
+    res.json({ items, fetchedAt: new Date().toISOString() });
   })
 );
 
