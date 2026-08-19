@@ -36,6 +36,7 @@ import {
   consumeStreamHistoryEvent,
   summarizeSearchOutcomeForHistory,
 } from "./src/services/history.js";
+import { fetchProviderBalances } from "./src/services/providerBalances.js";
 import authRoutes from "./src/routes/auth.js";
 import cabinetRoutes from "./src/routes/cabinet.js";
 import cabinetSearchRoutes from "./src/routes/cabinetSearch.js";
@@ -163,6 +164,16 @@ function sendProvidersMeta(_req, res) {
 
 app.get("/api/meta", requireUserApiKey, sendProvidersMeta);
 app.get("/api/v1/providers", requireUserApiKey, sendProvidersMeta);
+
+app.get("/api/v1/balances", requireUserApiKey, async (_req, res) => {
+  try {
+    const items = await fetchProviderBalances();
+    res.json({ items, fetchedAt: new Date().toISOString() });
+  } catch (e) {
+    logError(e, "api:v1:balances");
+    res.status(500).json({ error: "Не удалось получить балансы провайдеров." });
+  }
+});
 
 const openApiPath = join(__dirname, "openapi", "openapi.json");
 let openApiSpec = null;
