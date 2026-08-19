@@ -99,8 +99,28 @@ function pickProviderField(providerId, field, userSecrets, fallback = "") {
   return fallback;
 }
 
+const PROVIDER_BASE_URL_FIELDS = {
+  chatgpt: "OPENAI_BASE_URL",
+  deepseek: "DEEPSEEK_BASE_URL",
+  perplexity: "PERPLEXITY_BASE_URL",
+  google: "GOOGLE_BASE_URL",
+  alice: "ALICE_BASE_URL",
+};
+
+/** Маршрут через Polza.ai (BASE_URL указывает на polza.ai). */
+function isPolzaRouted(providerId, userSecrets) {
+  const field = PROVIDER_BASE_URL_FIELDS[providerId];
+  if (!field) return false;
+  const base = pickProviderField(providerId, field, userSecrets, "");
+  return /polza\.ai/i.test(base);
+}
+
 /** Ключ провайдера или общий POLZA_API_KEY (один ЛК Polza на несколько моделей). */
 function pickProviderApiKey(providerId, field, userSecrets) {
+  if (isPolzaRouted(providerId, userSecrets)) {
+    const polza = pickProviderField(providerId, "POLZA_API_KEY", userSecrets);
+    if (polza) return polza;
+  }
   const direct = pickProviderField(providerId, field, userSecrets);
   if (direct) return direct;
   return pickProviderField(providerId, "POLZA_API_KEY", userSecrets);
@@ -501,9 +521,7 @@ async function geminiGenerateOnce(apiKey, model, query) {
 async function yandexAlice(query, userSecrets = null) {
   const polzaBase = pickProviderField("alice", "ALICE_BASE_URL", userSecrets, "");
   if (polzaBase) {
-    const apiKey =
-      pickProviderField("alice", "ALICE_API_KEY", userSecrets) ||
-      pickProviderApiKey("alice", "POLZA_API_KEY", userSecrets);
+    const apiKey = pickProviderApiKey("alice", "ALICE_API_KEY", userSecrets);
     if (!apiKey) throw new Error("Задайте ALICE_API_KEY или POLZA_API_KEY для маршрута через Polza");
     return chatCompletionsViaFetch({
       providerId: "alice",
